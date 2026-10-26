@@ -69,12 +69,12 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 const t = (d) => d ? new Date(d).toLocaleString() : '—';
-const actionPill = (a) => `<span class="pill ${a === 'approved' ? 'pass' : a === 'error' ? 'fail' : 'warn'}">${esc(a)}</span>`;
+const actionPill = (a) => `<span class="pill ${/^(fixed & approved|ready to submit)$/.test(a) ? 'pass' : a === 'error' ? 'fail' : 'warn'}">${esc(a)}</span>`;
 
 async function load() {
   const s = await (await fetch('api/state')).json();
   const c = s.config;
-  $('cfg').textContent = `Checks "${c.pickUp.join(', ')}" ${c.paused ? '· AUTO-CHECK PAUSED' : `every ${c.everyMinutes} min`} → pass: ${c.approve}, fail: ${c.reject}${c.dryRun ? ' · DRY RUN (no CMS changes)' : ''}`;
+  $('cfg').textContent = `Checks "${c.pickUp.join(', ')}" ${c.paused ? '· AUTO-CHECK PAUSED' : `every ${c.everyMinutes} min`} → SEO update prepared → you click Submit${c.dryRun ? ' · DRY RUN (no CMS changes)' : ''}`;
   paused = c.paused;
   $('pause').textContent = paused ? 'Resume auto-check' : 'Pause auto-check';
   if (document.activeElement !== $('every')) $('every').value = c.everyMinutes;
@@ -84,8 +84,9 @@ async function load() {
     ['Last run', t(s.lastRun?.at)],
     ['Next run', t(s.nextRun)],
     ['Checked', r.length],
-    ['Approved', r.filter((x) => x.action === 'approved').length],
-    ['Need fixes', r.filter((x) => x.result?.status === 'fail').length],
+    ['Ready to submit', r.filter((x) => x.action === 'ready to submit').length],
+    ['Need fixes', r.filter((x) => x.action === 'needs fix').length],
+    ['Submitted', r.filter((x) => x.action === 'fixed & approved').length],
   ].map(([k, v]) => `<div class="stat"><span>${k}</span><b>${esc(v)}</b></div>`).join('');
   if (s.lastRun?.error) $('stats').innerHTML += `<div class="stat fail"><span>Error</span>${esc(s.lastRun.error)}</div>`;
 
@@ -107,20 +108,25 @@ async function load() {
 
 const copies = {};
 function fixPanel(x) {
-  if (x.type !== 'blogs' || x.result?.status !== 'fail') return '';
+  if (!x.result) return '';
   const f = x.fix;
-  const again = `<button class="small" onclick="fixNow('${x.id}', this)">${f ? 'Fix again' : 'Fix with AI'}</button>`;
+  const again = `<button class="small" onclick="fixNow('${x.id}', this)">${f ? 'Fix again' : 'Fix'}</button>`;
   if (!f) return `<div class="fix">${again}</div>`;
   if (f.error) return `<div class="fix"><b>Auto-fix</b><div class="fail-text">${esc(f.error)}</div>${again}</div>`;
-  const fields = [['Meta title', 'metaTitle'], ['Meta description', 'metaDescription'], ['URL', 'pageUrl'], ['Date', 'date'], ['Writer', 'authorName'], ['Article HTML', 'html']];
+  const canSubmit = f.after.status === 'pass' && !f.submittedAt;
+  const submit = `<button class="small" ${canSubmit ? '' : 'disabled'} onclick="submitNow('${x.id}', this)">Submit</button>`;
+  const labels = { title: 'H1', pageDisplayTitle: 'H1', metaTitle: 'Meta title', metaDescription: 'Meta description', pageUrl: 'URL', date: 'Date', authorName: 'Writer', html: 'Article HTML' };
+  const fields = Object.keys(f.fields).map((k) => [labels[k] || `${k} content`, k]);
   return `<div class="fix">
-    <div class="fix-head"><b>Auto-fix</b><span>Score ${f.before.score} → <b>${f.after.score}</b></span>
+    <div class="fix-head"><b>${f.isUpdate ? 'SEO update (URL kept)' : 'SEO update (new page)'}</b><span>Score ${f.before.score} → <b>${f.after.score}</b></span>
       <span class="pill ${f.after.status}">${f.after.status === 'pass' ? 'PASSES AFTER FIX' : 'STILL NEEDS WORK'}</span>
-      <span class="muted">${f.saved ? 'Saved to CMS' : 'Not saved — copy into CMS'}</span>${again}</div>
+      <span class="muted">${f.submittedAt ? 'Submitted & approved' : canSubmit ? `Submit ${f.imageFile ? 'uploads the new image, ' : ''}saves this in the CMS and approves` : 'Fix the remaining issues in the CMS'}</span>${again}${submit}</div>
+    <div class="fail-text" id="submit-${x.id}"></div>
     <ul>${f.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>
     ${f.imageFile ? `<div class="img"><img src="fixes/${esc(f.imageFile)}" alt="${esc(f.imageAlt)}"><div><a href="fixes/${esc(f.imageFile)}" download>Download feature image</a><br><span class="muted">Alt: ${esc(f.imageAlt)}</span></div></div>` : ''}
     <div class="copy">${fields.filter(([, k]) => f.fields[k]).map(([label, k]) => {
       const id = `${x.id}-${k}`; copies[id] = f.fields[k];
+      if (typeof f.fields[k] === 'object') return `<div><span>${esc(label)}</span><code class="muted">CTAs added — saved on Submit</code></div>`;
       return `<div><span>${label}</span>${k === 'html' ? `<code class="muted">${f.fields.html.length.toLocaleString()} characters</code>` : `<code>${esc(f.fields[k])}</code>`}<button class="small" onclick="copyText('${id}', this)">Copy</button></div>`;
     }).join('')}</div>
   </div>`;
@@ -131,6 +137,14 @@ async function fixNow(id, btn) {
   const open = [...document.querySelectorAll('details[open]')].map((d) => d.dataset.id);
   await fetch('api/fix/' + id, { method: 'POST' }); await load();
   open.forEach((o) => document.querySelector(`details[data-id="${o}"]`)?.setAttribute('open', ''));
+}
+async function submitNow(id, btn) {
+  if (!confirm('Save this fix in the CMS and approve the task?')) return;
+  btn.disabled = true; btn.textContent = 'Submitting…';
+  const r = await fetch('api/submit/' + id, { method: 'POST' });
+  const j = await r.json();
+  if (!r.ok) { $('submit-' + id).textContent = j.error; btn.disabled = false; btn.textContent = 'Submit'; return; }
+  await load(); flash(`Task #${j.subTaskId} submitted — status: ${j.status}`);
 }
 
 let paused = false;

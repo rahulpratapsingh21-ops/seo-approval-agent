@@ -40,8 +40,9 @@ export async function rulesFor(type, page) {
     medianCta,
     // Below half the usual length for this tab → warn; below a quarter → fail.
     minWords: stats.length >= 5 ? Math.max(100, Math.round(medianWords * 0.5)) : fallback,
-    // Require 2–3 CTAs only where published pages of this kind actually use them.
-    requireCta: type === 'blogs' || (stats.length >= 5 && medianCta >= 1),
+    // Blogs need 2–3 CTAs; college/exam/course silos need 1–3 depending on length.
+    requireCta: true,
+    ctaByLength: type !== 'blogs',
   };
   cache.set(key, { at: Date.now(), rules });
   return rules;

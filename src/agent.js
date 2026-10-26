@@ -1,7 +1,7 @@
-import { listSubTasks, getDraft, getSubTask, setSubTaskStatus, tabHtml, getTask, findLivePage, getUserName, STATUS, TYPES } from './cms.js';
-import { runChecks, reviewMessage } from './checks.js';
+import { listSubTasks, getDraft, tabHtml, getTask, findLivePage, findLiveSilo, getUserName, approveContent, uploadImage } from './cms.js';
+import { runChecks } from './checks.js';
 import { rulesFor } from './benchmarks.js';
-import { fixBlog, FIX_DIR } from './fixer.js';
+import { fixBlog, fixSilo, FIX_DIR } from './fixer.js';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 /** Check one subtask's draft. Falls back to SEO fields on the subtask if the draft lacks them. */
@@ -22,12 +22,18 @@ export async function checkSubTask(st) {
     html: isBlog ? draft.html : tabHtml(draft, st.page),
   };
   if (isBlog) Object.assign(page, { heroImage: draft.heroImage, date: draft.date, authorName: draft.authorName });
-  // Update task = the parent task says so, or the URL is already live on the website.
-  const [task, liveUrl] = await Promise.all([getTask(st.parentTaskId), findLivePage(page.pageUrl)]);
-  page.liveUrl = liveUrl;
-  page.isUpdate = !!(liveUrl || task?.updateData);
-  const rules = await rulesFor(type, st.page);
-  return { ...base, title: page.title, pageUrl: page.pageUrl, isUpdate: page.isUpdate, liveUrl, rules, result: runChecks(page, rules) };
+  if (isBlog) {
+    // Blog update = the parent task says so, or the URL is already live on the website.
+    const [task, liveUrl] = await Promise.all([getTask(st.parentTaskId), findLivePage(page.pageUrl)]);
+    Object.assign(page, { liveUrl, isUpdate: !!(liveUrl || task?.updateData) });
+  } else {
+    // College/exam/course silo update = this silo is already published / live for the entity.
+    const silo = await findLiveSilo(type, draft);
+    Object.assign(page, { liveUrl: silo.url, isUpdate: silo.exists });
+  }
+  // A live blog with a CTA already has enough; new blogs need 2–3.
+  const rules = { ...(await rulesFor(type, st.page)), ...(isBlog && page.isUpdate && { minCta: 1 }) };
+  return { ...base, title: page.title, pageUrl: page.pageUrl, isUpdate: page.isUpdate, liveUrl: page.liveUrl, rules, result: runChecks(page, rules) };
 }
 
 export async function checkAll() {
@@ -38,23 +44,27 @@ export async function checkAll() {
 }
 
 // One fix per saved draft version, so a draft is only sent to Claude again after the writer changes it.
+// FIX_VERSION goes up when the fix rules change, so older saved fixes are made again.
+const FIX_VERSION = 2;
 const fixPath = (id) => `${FIX_DIR}/${id}.json`;
 export function getFix(subTaskId) {
   try { return JSON.parse(readFileSync(fixPath(subTaskId), 'utf8')); } catch { return null; }
 }
 
 export async function fixSubTask(st, { force = false } = {}) {
-  if (st.contentCategory !== 'blogs') return null;
   if (!process.env.ANTHROPIC_API_KEY) return { error: 'Add ANTHROPIC_API_KEY to .env to enable auto-fix' };
   const draft = await getDraft(st);
   if (!draft) return null;
   const old = getFix(st.subTaskId);
-  if (!force && old?.draftSavedAt === draft._savedAt && !old.error) return old;
+  if (!force && old?.draftSavedAt === draft._savedAt && old.version === FIX_VERSION && !old.error) return old;
   let fix;
   try {
     const item = await checkSubTask(st);
-    const writer = draft.authorName ? null : await getUserName(st.contentWriter);
-    fix = { ...(await fixBlog(st, draft, item.result, { isUpdate: item.isUpdate, liveUrl: item.liveUrl, writer })), draftSavedAt: draft._savedAt };
+    const opts = { isUpdate: item.isUpdate, liveUrl: item.liveUrl, rules: item.rules };
+    const made = st.contentCategory === 'blogs'
+      ? await fixBlog(st, draft, item.result, { ...opts, writer: draft.authorName ? null : await getUserName(st.contentWriter) })
+      : await fixSilo(st, draft, item.result, opts);
+    fix = { ...made, draftSavedAt: draft._savedAt, version: FIX_VERSION };
   } catch (e) {
     fix = { error: e.message, draftSavedAt: draft._savedAt, at: new Date().toISOString() };
   }
@@ -64,19 +74,36 @@ export async function fixSubTask(st, { force = false } = {}) {
 }
 
 /**
- * Pass → status Approved + review note.
- * Fail → fix list saved in reviewMessage, status left as is (set REJECT_STATUS to also move it).
+ * Every task gets its SEO update prepared (meta, image, links, CTAs — see fixer.js) from the current content.
+ * It then waits for Submit on the dashboard, which saves it in the CMS and approves.
  */
 export async function decide(st, { dryRun = false } = {}) {
   const item = await checkSubTask(st);
-  const pass = item.result.status === 'pass';
-  const msg = reviewMessage(item.result);
-  const next = pass ? STATUS.approve : STATUS.reject || st.status;
-  const changed = next !== st.status || msg !== st.reviewMessage;
-  if (!dryRun && changed) await setSubTaskStatus(st.id, next, msg);
-  const action = pass ? 'approved' : changed ? 'notes saved' : 'unchanged';
-  const fix = pass ? null : await fixSubTask(st);
-  return { ...item, fix, action: dryRun && action !== 'unchanged' ? `test: would be ${action}` : action, newStatus: next, dryRun };
+  const fix = await fixSubTask(st);
+  const action = fix?.after?.status === 'pass' ? 'ready to submit' : 'needs fix';
+  return { ...item, fix, action, dryRun };
+}
+
+/** Submit: upload the new feature image, save the prepared fields into the CMS draft and approve. */
+export async function submitSubTask(st) {
+  const draft = await getDraft(st);
+  const fix = getFix(st.subTaskId);
+  if (!fix || fix.error) throw new Error('Click Fix first');
+  if (fix.submittedAt) throw new Error('Already submitted');
+  if (fix.draftSavedAt !== draft?._savedAt) throw new Error('The writer changed the draft after this fix — click Fix again');
+  if (fix.after.status !== 'pass') throw new Error('The fix still fails some checks — fix those in the CMS first');
+  const fields = { ...fix.fields };
+  if (fix.imageFile) {
+    // Remembered, so a retry after a failed approval doesn't upload the image twice.
+    const alt = fix.imageAlt || fields.title || draft.title;
+    fix.heroImage ??= await uploadImage(readFileSync(`${FIX_DIR}/${fix.imageFile}`), { caption: alt, altText: alt });
+    writeFileSync(fixPath(st.subTaskId), JSON.stringify(fix, null, 2));
+    fields.heroImage = fix.heroImage;
+  }
+  const after = await approveContent(st, fields);
+  fix.submittedAt = new Date().toISOString();
+  writeFileSync(fixPath(st.subTaskId), JSON.stringify(fix, null, 2));
+  return { subTaskId: st.subTaskId, status: after.status, imageFile: fix.imageFile };
 }
 
 /** One agent run: check every subtask waiting for SEO review and act on it. */

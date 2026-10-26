@@ -22,6 +22,9 @@ export function ctaOffTopic(ctaText, primary, title) {
   return !topicWords.some((w) => norm(ctaText).split(' ').includes(w));
 }
 
+/** CTAs a college/exam/course silo needs for its length. */
+export const ctaTarget = (words) => (words < 600 ? 1 : words < 1500 ? 2 : 3);
+
 /** Today's date in India (YYYY-MM-DD); the CMS stores dates as IST midnight. */
 export const todayIST = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 const dayIST = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -40,6 +43,7 @@ export function runChecks(page, rules = {}) {
   const primary = toList(page.primaryKeywords)[0] || '';
   const bodyText = $.root().text().replace(/\s+/g, ' ').trim();
   const words = bodyText ? bodyText.split(' ').length : 0;
+  if (r.ctaByLength) r.minCta = ctaTarget(words);
 
   // 1. CTA boxes: one box = the table (or heading/paragraph) holding links to the lead form.
   const boxes = new Set();
@@ -135,7 +139,8 @@ export function runChecks(page, rules = {}) {
 
   const fails = checks.filter((c) => c.level === 'fail').length;
   const warns = checks.filter((c) => c.level === 'warn').length;
-  const score = Math.max(0, Math.round(100 - fails * 15 - warns * 5));
+  // A pass scores 100; warnings are notes only and never block or change a passing article.
+  const score = fails ? Math.max(0, Math.round(100 - fails * 15 - warns * 5)) : 100;
   return { status: fails ? 'fail' : 'pass', score, ctaCount, words, checks };
 }
 

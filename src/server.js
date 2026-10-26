@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { runAgent, checkSubTask, fixSubTask } from './agent.js';
+import { runAgent, checkSubTask, fixSubTask, submitSubTask } from './agent.js';
 import { FIX_DIR } from './fixer.js';
 import { getSubTask, STATUS } from './cms.js';
 
@@ -40,10 +40,11 @@ async function run(trigger) {
     const results = await runAgent({ dryRun: DRY_RUN });
     state.lastResults = results;
     for (const r of results) {
-      if (r.action !== 'unchanged') state.log.unshift({ at: started, trigger, subTaskId: r.subTaskId, title: r.title, action: r.action, score: r.result?.score, error: r.error });
+      // Log each task once per new outcome, not on every scheduled run.
+      if (state.log.find((l) => l.subTaskId === r.subTaskId)?.action !== r.action) state.log.unshift({ at: started, trigger, subTaskId: r.subTaskId, title: r.title, action: r.action, score: r.result?.score, error: r.error });
     }
     state.log = state.log.slice(0, 300);
-    state.lastRun = { at: started, trigger, count: results.length, approved: results.filter((r) => r.action === 'approved').length };
+    state.lastRun = { at: started, trigger, count: results.length, readyToSubmit: results.filter((r) => r.action === 'ready to submit').length };
     return state.lastRun;
   } catch (e) {
     state.lastRun = { at: started, trigger, error: e.message };
@@ -97,6 +98,16 @@ app.post('/api/fix/:id', async (req, res) => {
     const r = state.lastResults.find((x) => x.id === req.params.id);
     if (r) r.fix = fix;
     res.json(fix);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/submit/:id', async (req, res) => {
+  if (DRY_RUN) return res.status(400).json({ error: 'Test mode (DRY_RUN=true) — set DRY_RUN=false in .env to submit to the CMS' });
+  try {
+    const out = await submitSubTask(await getSubTask(req.params.id));
+    const r = state.lastResults.find((x) => x.id === req.params.id);
+    if (r) r.action = 'fixed & approved';
+    state.log.unshift({ at: new Date(), trigger: 'manual', subTaskId: out.subTaskId, title: r?.title, action: 'fixed & approved' });
+    res.json(out);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
