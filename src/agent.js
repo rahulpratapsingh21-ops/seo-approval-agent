@@ -51,12 +51,32 @@ export function getFix(subTaskId) {
   try { return JSON.parse(readFileSync(fixPath(subTaskId), 'utf8')); } catch { return null; }
 }
 
+/**
+ * Anthropic API problems the user must act on (credit, key) or wait out (rate limit, busy).
+ * Shown as a banner on the dashboard; while credit is out or the key is bad, AI fixes pause for 30 minutes.
+ */
+export const aiStatus = { problem: null, kind: null, at: null, pausedUntil: 0 };
+function aiProblem(e) {
+  const text = `${e?.status || ''} ${e?.message || ''}`;
+  if (/credit balance is too low|billing|insufficient.*credit/i.test(text))
+    return { kind: 'credit', pause: true, problem: 'Anthropic credit has run out. AI fixes are paused — add credit at console.anthropic.com → Settings → Billing, then click "Fix again".' };
+  if (e?.status === 401 || /authentication_error|invalid x-api-key/i.test(text))
+    return { kind: 'key', pause: true, problem: 'Anthropic API key is not valid. Update ANTHROPIC_API_KEY in .env (and on Render), then restart the agent.' };
+  if (e?.status === 429 || /rate_limit/i.test(text))
+    return { kind: 'rate', pause: false, problem: 'Anthropic rate limit reached — fixes will continue on the next check.' };
+  if (e?.status === 529 || /overloaded/i.test(text))
+    return { kind: 'busy', pause: false, problem: 'Anthropic is busy right now — fixes will continue on the next check.' };
+  return null;
+}
+
 export async function fixSubTask(st, { force = false } = {}) {
   if (!process.env.ANTHROPIC_API_KEY) return { error: 'Add ANTHROPIC_API_KEY to .env to enable auto-fix' };
   const draft = await getDraft(st);
   if (!draft) return null;
   const old = getFix(st.subTaskId);
   if (!force && old?.draftSavedAt === draft._savedAt && old.version === FIX_VERSION && !old.error) return old;
+  // Credit out / bad key: don't call Claude for every task; "Fix again" (force) still tries.
+  if (!force && Date.now() < aiStatus.pausedUntil) return { error: aiStatus.problem, draftSavedAt: draft._savedAt };
   let fix;
   try {
     const item = await checkSubTask(st);
@@ -65,8 +85,11 @@ export async function fixSubTask(st, { force = false } = {}) {
       ? await fixBlog(st, draft, item.result, { ...opts, writer: draft.authorName ? null : await getUserName(st.contentWriter) })
       : await fixSilo(st, draft, item.result, opts);
     fix = { ...made, draftSavedAt: draft._savedAt, version: FIX_VERSION };
+    Object.assign(aiStatus, { problem: null, kind: null, at: null, pausedUntil: 0 }); // Claude answered: all clear
   } catch (e) {
-    fix = { error: e.message, draftSavedAt: draft._savedAt, at: new Date().toISOString() };
+    const p = aiProblem(e);
+    if (p) Object.assign(aiStatus, { problem: p.problem, kind: p.kind, at: new Date().toISOString(), pausedUntil: p.pause ? Date.now() + 30 * 60 * 1000 : 0 });
+    fix = { error: p?.problem || e.message, draftSavedAt: draft._savedAt, at: new Date().toISOString() };
   }
   mkdirSync(FIX_DIR, { recursive: true });
   writeFileSync(fixPath(st.subTaskId), JSON.stringify(fix, null, 2));

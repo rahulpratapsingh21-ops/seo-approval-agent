@@ -11,6 +11,9 @@
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
   main { max-width:1320px; margin:0 auto; padding:20px 16px 60px; }
+  .alert { border-radius:10px; padding:12px 14px; margin-bottom:12px; font-weight:600; border:1px solid var(--fail); background:var(--fail-bg); color:var(--fail); }
+  .alert.temp { border-color:var(--warn); background:var(--warn-bg); color:var(--warn); }
+  .alert small { display:block; font-weight:400; opacity:.85; }
   .brand { display:flex; gap:12px; align-items:center; min-width:0; } .brand img { flex:none; border-radius:10px; }
   .filters { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 10px; }
   .filters button { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:99px; padding:6px 14px; font-size:14px; font-weight:600; }
@@ -67,6 +70,7 @@
       <div><h1>SEO Approval Agent</h1><div class="muted" id="cfg"></div></div></div>
     <button id="run">Run now</button>
   </header>
+  <div id="aiAlert" class="alert" hidden></div>
   <div class="controls">
     <button id="pause" class="secondary">Pause auto-check</button>
     <label>Check every <input id="every" type="number" min="1" max="1440" step="1"> minutes</label>
@@ -106,6 +110,13 @@ async function load() {
   paused = c.paused;
   $('pause').textContent = paused ? 'Resume auto-check' : 'Pause auto-check';
   if (document.activeElement !== $('every')) $('every').value = c.everyMinutes;
+  // Anthropic problem (credit ended, bad key, rate limit, busy) → banner at the top.
+  const ai = s.ai || {};
+  $('aiAlert').hidden = !ai.problem;
+  if (ai.problem) {
+    $('aiAlert').className = `alert${ai.kind === 'rate' || ai.kind === 'busy' ? ' temp' : ''}`;
+    $('aiAlert').innerHTML = `⚠️ ${esc(ai.problem)}<small>Since ${t(ai.at)}${ai.pausedUntil ? ` · next automatic try ${t(ai.pausedUntil)}` : ''}</small>`;
+  }
   const r = s.lastResults || [];
   $('stats').innerHTML = [
     ['Status', s.running ? 'Running…' : paused ? 'Paused' : 'Idle'],

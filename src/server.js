@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { runAgent, checkSubTask, fixSubTask, submitSubTask } from './agent.js';
+import { runAgent, checkSubTask, fixSubTask, submitSubTask, aiStatus } from './agent.js';
 import { FIX_DIR } from './fixer.js';
 import { getSubTask, countSubTasks, countApprovedSince, STATUS } from './cms.js';
 import { todayIST } from './checks.js';
@@ -102,7 +102,7 @@ function schedule() {
 }
 
 app.get('/health', (_, res) => res.send('ok'));
-app.get('/api/state', (_, res) => res.json({ ...state, config: { ...settings, dryRun: DRY_RUN, pickUp: STATUS.pickUp, approve: STATUS.approve, reject: STATUS.reject || '(keep status)' } }));
+app.get('/api/state', (_, res) => res.json({ ...state, ai: aiStatus, config: { ...settings, dryRun: DRY_RUN, pickUp: STATUS.pickUp, approve: STATUS.approve, reject: STATUS.reject || '(keep status)' } }));
 // SEO queue sizes and today's approvals for the dashboard side panel (cached a minute; the page polls every 15 s).
 let counts = { at: 0, data: null };
 app.get('/api/counts', async (_, res) => {
