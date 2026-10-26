@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { runAgent, checkSubTask, fixSubTask, submitSubTask } from './agent.js';
 import { FIX_DIR } from './fixer.js';
-import { getSubTask, STATUS } from './cms.js';
+import { getSubTask, countSubTasks, STATUS } from './cms.js';
 
 const app = express();
 app.use(express.json());
@@ -68,6 +68,14 @@ function schedule() {
 
 app.get('/health', (_, res) => res.send('ok'));
 app.get('/api/state', (_, res) => res.json({ ...state, config: { ...settings, dryRun: DRY_RUN, pickUp: STATUS.pickUp, approve: STATUS.approve, reject: STATUS.reject || '(keep status)' } }));
+// SEO queue sizes for the dashboard side panel (cached a minute; the page polls every 15 s).
+let counts = { at: 0, data: null };
+app.get('/api/counts', async (_, res) => {
+  try {
+    if (Date.now() - counts.at > 60000) counts = { at: Date.now(), data: await countSubTasks() };
+    res.json({ ...counts.data, at: new Date(counts.at), cmsUrl: process.env.CMS_URL });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.all('/api/run', async (req, res) => res.json(await run(req.query.key ? 'cron' : 'manual')));
 app.post('/api/settings', (req, res) => {
   const { paused, everyMinutes } = req.body || {};

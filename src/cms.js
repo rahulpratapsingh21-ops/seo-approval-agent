@@ -67,6 +67,16 @@ export async function listSubTasks(statuses = STATUS.pickUp) {
   return j.docs;
 }
 
+/** How many subtasks wait in each SEO status, per content type: { readyForSEOReview: { blogs: 3, … }, inSEOReview: { … } }. */
+export async function countSubTasks(statuses = ['readyForSEOReview', 'inSEOReview']) {
+  const out = {};
+  await Promise.all(statuses.flatMap((status) => Object.keys(TYPES).map(async (type) => {
+    const j = await api(`/subTasks?${qs({ 'where[status][equals]': status, 'where[contentCategory][equals]': type, limit: 1, depth: 0 })}`);
+    (out[status] ??= {})[type] = j.totalDocs;
+  })));
+  return out;
+}
+
 /** Latest saved draft for a subtask. */
 export async function getDraft(subTask) {
   const type = TYPES[subTask.contentCategory];

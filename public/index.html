@@ -9,7 +9,13 @@
   @media (prefers-color-scheme: dark) { :root { --bg:#121417; --card:#1b1e23; --text:#e8eaed; --muted:#98a2b3; --line:#2c3138; --pass:#4cc38a; --pass-bg:#16301f; --warn:#f0b54a; --warn-bg:#352a12; --fail:#f2766b; --fail-bg:#3a1c1a; --accent:#f05a9a; } }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
-  main { max-width:1000px; margin:0 auto; padding:20px 16px 60px; }
+  main { max-width:1320px; margin:0 auto; padding:20px 16px 60px; }
+  .layout { display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:20px; align-items:start; }
+  .queue { position:sticky; top:16px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .queue h2 { margin:0 0 4px; } .queue table { border:0; } .queue td, .queue th { padding:7px 6px; }
+  .queue td.n, .queue th.n { text-align:right; font-variant-numeric:tabular-nums; } .queue td.n b { font-size:17px; }
+  .queue tr.total td { border-bottom:0; font-weight:700; } .queue a { color:inherit; text-decoration:none; } .queue a:hover { color:var(--accent); }
+  @media (max-width:900px) { .layout { grid-template-columns:1fr; } .queue { position:static; order:-1; } }
   header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:16px; }
   h1 { font-size:22px; margin:0; } h2 { font-size:16px; margin:24px 0 10px; }
   button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 18px; font-size:15px; font-weight:600; cursor:pointer; }
@@ -59,11 +65,20 @@
     <button id="clear" class="secondary danger">Clear history</button>
     <span id="msg" class="muted"></span>
   </div>
-  <div class="stats" id="stats"></div>
-  <h2>Last run — articles checked</h2>
-  <div id="items"></div>
-  <h2>Activity log</h2>
-  <div class="scroll"><table><thead><tr><th>Time</th><th>Task</th><th>Article</th><th>Action</th><th>Score</th></tr></thead><tbody id="log"></tbody></table></div>
+  <div class="layout">
+    <div>
+      <div class="stats" id="stats"></div>
+      <h2>Last run — articles checked</h2>
+      <div id="items"></div>
+      <h2>Activity log</h2>
+      <div class="scroll"><table><thead><tr><th>Time</th><th>Task</th><th>Article</th><th>Action</th><th>Score</th></tr></thead><tbody id="log"></tbody></table></div>
+    </div>
+    <aside class="queue">
+      <h2>SEO queue in CMS</h2>
+      <div class="muted" id="queueAt" style="font-size:13px">Loading…</div>
+      <table><thead><tr><th>Type</th><th class="n">Ready for SEO review</th><th class="n">In SEO review</th></tr></thead><tbody id="queue"></tbody></table>
+    </aside>
+  </div>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -104,6 +119,24 @@ async function load() {
   $('log').innerHTML = s.log.length ? s.log.map((l) => `<tr><td>${t(l.at)}</td><td>#${esc(l.subTaskId)}</td><td>${esc(l.title)}</td><td>${actionPill(l.action)}${l.error ? ' ' + esc(l.error) : ''}</td><td>${l.score ?? ''}</td></tr>`).join('')
     : '<tr><td colspan="5" class="muted">No actions yet.</td></tr>';
   $('run').disabled = s.running;
+}
+
+// Right panel: how many subtasks wait in each SEO status, per type; each number opens that list in the CMS.
+const TYPES = [['blogs', 'Blogs'], ['colleges', 'Colleges'], ['exams', 'Exams'], ['courses', 'Courses']];
+async function loadQueue() {
+  const r = await fetch('api/counts');
+  const q = await r.json();
+  if (!r.ok) { $('queueAt').textContent = q.error; return; }
+  const link = (status, type, n) => {
+    const where = `where[status][equals]=${status}` + (type ? `&where[contentCategory][equals]=${type}` : '');
+    return q.cmsUrl ? `<a href="${esc(q.cmsUrl)}/admin/collections/subTasks?${where}" target="_blank" rel="noopener">${n}</a>` : n;
+  };
+  const sum = (status) => TYPES.reduce((s, [k]) => s + (q[status]?.[k] || 0), 0);
+  $('queue').innerHTML = TYPES.map(([k, label]) => `<tr><td>${label}</td>
+    <td class="n"><b>${link('readyForSEOReview', k, q.readyForSEOReview?.[k] ?? 0)}</b></td>
+    <td class="n"><b>${link('inSEOReview', k, q.inSEOReview?.[k] ?? 0)}</b></td></tr>`).join('')
+    + `<tr class="total"><td>Total</td><td class="n">${link('readyForSEOReview', '', sum('readyForSEOReview'))}</td><td class="n">${link('inSEOReview', '', sum('inSEOReview'))}</td></tr>`;
+  $('queueAt').textContent = `Updated ${new Date(q.at).toLocaleTimeString()} · click a number to open the list in the CMS`;
 }
 
 const copies = {};
@@ -164,7 +197,8 @@ $('clear').onclick = async () => {
 };
 
 $('run').onclick = async () => { $('run').disabled = true; $('run').textContent = 'Running…'; await fetch('api/run', { method: 'POST' }); $('run').textContent = 'Run now'; load(); };
-load(); setInterval(() => { if (!document.querySelector('details[open]')) load(); }, 15000);
+load(); loadQueue();
+setInterval(() => { if (!document.querySelector('details[open]')) load(); loadQueue(); }, 15000);
 </script>
 </body>
 </html>
