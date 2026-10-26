@@ -140,6 +140,7 @@ app.post('/api/submit/:id', async (req, res) => {
 });
 
 app.use('/fixes', express.static(FIX_DIR));
+app.get('/logo.png', (_, res) => res.sendFile(fileURLToPath(new URL('../assets/syu-icon.png', import.meta.url))));
 app.use(express.static(fileURLToPath(new URL('../public', import.meta.url))));
 
 app.listen(PORT, () => {
