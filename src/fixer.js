@@ -20,7 +20,7 @@ const FixPlan = z.object({
   metaTitle: z.string().describe('50–60 characters, contains the primary keyword near the start.'),
   metaDescription: z.string().describe('130–155 characters, contains the primary keyword, ends with a reason to click.'),
   slug: z.string().describe('lowercase-hyphenated URL slug with the main keyword, max 60 chars, no dates unless essential.'),
-  ctaText: z.string().describe('CTA line about this article\'s title topic, e.g. "Start Your MBA Journey – Get FREE Expert Guidance for CAT 2026". No emoji.'),
+  ctaText: z.string().describe('Short CTA line about this article\'s topic, 35–55 characters, e.g. "Get FREE Expert Guidance for PTU Results 2026". No emoji.'),
   internalLinks: z.array(z.object({
     anchorText: z.string().describe('Keyword phrase copied word-for-word from the article text (1–6 words) that names the target page\'s topic, e.g. "GSEB HSC exam" or "IKGPTU".'),
     url: z.string().describe('One of the candidate URLs, unchanged.'),
@@ -61,6 +61,41 @@ function keyPhrases(keywords) {
     }
   }
   return [...out];
+}
+
+const CTA_MAX = 60;
+const ctaPlain = ($, a) => $(a).text().replace(/[☎️\s]+/gu, ' ').trim();
+
+/**
+ * Set a CTA link's text with exactly one phone icon on each side: older CTA boxes already have
+ * ☎️ outside the link, so icons go inside the link only when the box has none.
+ */
+function setCtaText($, a, text) {
+  $(a).html(`<span style="white-space: pre-wrap;">${text}</span>`);
+  const box = $(a).closest('h1, h2, h3, h4, p, th, td').get(0) || a;
+  if (!/☎/.test($(box).text())) $(a).html(`<span style="white-space: pre-wrap;">☎️ ${text} ☎️</span>`);
+}
+
+/**
+ * Existing CTAs: off-topic or too long → new text; doubled phone icons → one each side; good ones stay.
+ * Returns true when something changed.
+ */
+function tidyCtas($, ctaText, primary, title, changes) {
+  let changed = false;
+  $('a[href*="syu-leads-form"]').each((_, a) => {
+    const old = ctaPlain($, a);
+    const box = $(a).closest('h1, h2, h3, h4, p, th, td').get(0) || a;
+    if (ctaOffTopic(old, primary, title) || old.length > CTA_MAX) {
+      setCtaText($, a, ctaText);
+      changes.push(`Changed CTA "${old}" → "${ctaText}"`);
+      changed = true;
+    } else if (($(box).text().match(/☎/g) || []).length > 2) {
+      setCtaText($, a, old);
+      changes.push(`CTA "${old}": one phone icon each side`);
+      changed = true;
+    }
+  });
+  return changed;
 }
 
 const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -188,12 +223,7 @@ ${plainText($)}`,
   // 5. CTAs: CTAs that match the title stay as they are; off-topic ones get the new text.
   //    Update task: add only when there is none. New page: top up to 2 (3 for long articles).
   //    New CTAs go after the intro, mid-article and before the last section.
-  $('a[href*="syu-leads-form"]').each((_, a) => {
-    const old = $(a).text().replace(/[☎️\s]+/gu, ' ').trim();
-    if (!ctaOffTopic(old, primary, draft.title)) return;
-    $(a).html(`<span style="white-space: pre-wrap;">☎️ ${plan.ctaText} ☎️</span>`);
-    changes.push(`Changed off-topic CTA "${old}" → "${plan.ctaText}"`);
-  });
+  tidyCtas($, plan.ctaText, primary, plan.h1 || draft.title, changes);
   const isCta = (_, el) => $(el).find(`a[href*="syu-leads-form"]`).length > 0;
   const ctas = $.root().children().filter(isCta).toArray();
   const words = plainText($).split(' ').length;
@@ -306,18 +336,10 @@ ${text.slice(0, 40000)}`,
     changes.push(`Removed ${extra.length} extra CTA(s) in "${s.sectionDisplayTitle}" (max 3)`);
   }
 
-  // CTAs that don't match the page get the new text; matching ones stay.
+  // CTAs that don't match the page (or are too long) get the new text; matching ones stay.
   for (const s of sections) {
     const $ = cheerio.load(s.content.html, null, false);
-    let changed = false;
-    $('a[href*="syu-leads-form"]').each((_, a) => {
-      const old = $(a).text().replace(/[☎️\s]+/gu, ' ').trim();
-      if (!ctaOffTopic(old, primary, title)) return;
-      $(a).html(`<span style="white-space: pre-wrap;">☎️ ${plan.ctaText} ☎️</span>`);
-      changes.push(`Changed off-topic CTA "${old}" → "${plan.ctaText}"`);
-      changed = true;
-    });
-    if (changed) s.content.html = $.html();
+    if (tidyCtas($, plan.ctaText, primary, plan.h1 || title, changes)) s.content.html = $.html();
   }
 
   // Missing CTAs: spread over the longest sections without one (several per section if needed),
