@@ -5,8 +5,6 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { runAgent, checkSubTask, fixSubTask } from './agent.js';
 import { FIX_DIR } from './fixer.js';
 import { getSubTask, STATUS } from './cms.js';
-import { listTabs, parseRowList } from './sheets.js';
-import { previewRows, searchEntities, newSilos, createFromItem, userOptions, pageCategories, SILOS } from './taskCreator.js';
 
 const app = express();
 app.use(express.json());
@@ -101,14 +99,6 @@ app.post('/api/fix/:id', async (req, res) => {
     res.json(fix);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-// ---- Task creator --------------------------------------------------------------------------
-const tc = (fn) => async (req, res) => { try { res.json(await fn(req)); } catch (e) { res.status(400).json({ error: e.message }); } };
-app.get('/api/tc/tabs', tc(() => listTabs()));
-app.get('/api/tc/options', tc(async () => ({ ...(await userOptions()), pageCategories: await pageCategories(), silos: SILOS, sheetWrite: !!process.env.SHEET_WEBAPP_URL })));
-app.post('/api/tc/preview', tc((req) => previewRows({ gid: req.body.gid, name: req.body.name }, parseRowList(req.body.rows))));
-app.get('/api/tc/entities', tc((req) => searchEntities(req.query.category, req.query.q)));
-app.post('/api/tc/silos', tc((req) => newSilos(req.body.category, req.body.topic, req.body.entity)));
-app.post('/api/tc/create', tc((req) => createFromItem(req.body)));
 
 app.use('/fixes', express.static(FIX_DIR));
 app.use(express.static(fileURLToPath(new URL('../public', import.meta.url))));
