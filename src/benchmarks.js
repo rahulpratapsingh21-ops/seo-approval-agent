@@ -25,7 +25,7 @@ export async function rulesFor(type, page) {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL) return hit.rules;
 
-  const drafts = await listPublished(type, tab, 20).catch(() => []);
+  const drafts = await listPublished(type, tab, 10).catch(() => []);
   const stats = drafts
     .map((d) => measure(type === 'blogs' ? d.html : tabHtml(d, tab)))
     .filter((s) => s.words > 30);
