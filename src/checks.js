@@ -62,11 +62,14 @@ export function runChecks(page, rules = {}) {
     const off = ctaTexts.filter((t) => ctaOffTopic(t, primary, page.title));
     add('cta-topic', 'CTA text matches article topic', off.length ? 'warn' : 'pass',
       off.length ? `CTA may be copied from another article: "${off[0]}"` : 'CTA text mentions the article topic');
-    // Short CTA with one phone icon each side.
+    // Short CTA, one phone icon each side, an empty line above and below.
     const long = ctaTexts.find((t) => t.length > 60);
     const icons = [...boxes].find((b) => ($(b).text().match(/☎/g) || []).length > 2);
-    add('cta-style', 'CTA short, one ☎️ each side', long || icons ? 'warn' : 'pass',
-      long ? `CTA is ${long.length} characters (max 60): "${long}"` : icons ? 'CTA has more than one phone icon on a side' : 'OK');
+    const blank = (el) => !!el && el.tagName === 'p' && !$(el).text().trim() && !$(el).find('img').length;
+    const tight = [...boxes].filter((b) => b.tagName === 'table' && !(blank($(b).prev().get(0)) && blank($(b).next().get(0)))).length;
+    add('cta-style', 'CTA short, one ☎️ each side, space around', long || icons || tight ? 'warn' : 'pass',
+      long ? `CTA is ${long.length} characters (max 60): "${long}"` : icons ? 'CTA has more than one phone icon on a side'
+        : tight ? `${tight} CTA box(es) without an empty line above and below` : 'OK');
   }
 
   // 3. Meta title

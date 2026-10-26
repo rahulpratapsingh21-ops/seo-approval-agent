@@ -98,6 +98,20 @@ function tidyCtas($, ctaText, primary, title, changes) {
   return changed;
 }
 
+// Published articles have one empty line above and below each CTA box.
+const GAP = '<p class="editor-paragraph"><br></p>';
+const isGap = ($, el) => !!el && el.tagName === 'p' && !$(el).text().trim() && !$(el).find('img').length;
+
+/** Add the empty line above/below every CTA box that lacks one. Returns how many lines were added. */
+function ctaGaps($) {
+  let added = 0;
+  $('table').filter((_, t) => $(t).find('a[href*="syu-leads-form"]').length > 0).each((_, t) => {
+    if (!isGap($, $(t).prev().get(0))) { $(t).before(GAP); added++; }
+    if (!isGap($, $(t).next().get(0))) { $(t).after(GAP); added++; }
+  });
+  return added;
+}
+
 const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /**
@@ -148,12 +162,14 @@ export async function fixBlog(st, draft, before, { isUpdate = false, liveUrl = n
   const primary = (Array.isArray(draft.primaryKeywords) ? draft.primaryKeywords[0] : draft.primaryKeywords) || st.title;
 
   // 1. Competitor links: keep the words, drop the link; remove link-only blocks.
+  //    Only paragraphs emptied here are removed; the writer's blank lines stay.
   $('a').filter((_, a) => COMPETITORS.test($(a).attr('href') || '')).each((_, a) => {
     const text = $(a).text().trim();
+    const p = $(a).closest('p');
     if (!text || COMPETITORS.test(text) || /^https?:/i.test(text)) $(a).remove(); else $(a).replaceWith(text);
+    if (p.length && !p.text().trim() && !p.find('img').length) p.remove();
     changes.push(`Removed competitor link: ${$(a).attr('href')}`);
   });
-  $('p').filter((_, p) => !$(p).text().trim() && !$(p).find('img').length).remove();
 
   // 2. Ask Claude for the SEO fields.
   const imgs = $('img').toArray();
@@ -236,6 +252,8 @@ ${plainText($)}`,
     $(spot).after(ctaBlock(plan.ctaText));
     changes.push(`Added CTA: "☎️ ${plan.ctaText} ☎️"`);
   }
+  const gaps = ctaGaps($);
+  if (gaps) changes.push(`Added ${gaps} empty line(s) above/below CTAs`);
 
   // 6. SEO fields. URL only for new pages; date is always today; writer only when missing.
   // Every change so far (links, alt text, CTAs) was to the article HTML.
@@ -358,6 +376,15 @@ ${text.slice(0, 40000)}`,
     }
     s.content.html = $.html();
     changes.push(`Added ${k} CTA(s) in "${s.sectionDisplayTitle}": "☎️ ${plan.ctaText} ☎️"`);
+  }
+
+  // Empty line above and below every CTA box.
+  for (const s of sections.filter((x) => /syu-leads-form/.test(x.content.html))) {
+    const $ = cheerio.load(s.content.html, null, false);
+    const gaps = ctaGaps($);
+    if (!gaps) continue;
+    s.content.html = $.html();
+    changes.push(`Added ${gaps} empty line(s) around CTAs in "${s.sectionDisplayTitle}"`);
   }
 
   const fields = changes.length ? { [tabKey]: tab } : {};
