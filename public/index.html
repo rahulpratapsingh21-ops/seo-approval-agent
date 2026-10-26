@@ -85,7 +85,7 @@
       <h2>SEO queue in CMS</h2>
       <div class="muted" id="queueAt" style="font-size:13px">Loading…</div>
       <table><thead><tr><th>Type</th><th class="n">Ready for SEO review</th><th class="n">In SEO review</th></tr></thead><tbody id="queue"></tbody></table>
-      <h2 style="margin-top:18px">Approved today</h2>
+      <h2 style="margin-top:18px" id="approvedTitle">Approved</h2>
       <table><thead><tr><th>Type</th><th class="n">Approved in CMS</th><th class="n">Via Submit</th></tr></thead><tbody id="approvedToday"></tbody></table>
     </aside>
   </div>
@@ -156,6 +156,7 @@ async function loadQueue() {
     <td class="n"><b>${link('readyForSEOReview', k, q.readyForSEOReview?.[k] ?? 0)}</b></td>
     <td class="n"><b>${link('inSEOReview', k, q.inSEOReview?.[k] ?? 0)}</b></td></tr>`).join('')
     + `<tr class="total"><td>Total</td><td class="n">${link('readyForSEOReview', '', sum('readyForSEOReview'))}</td><td class="n">${link('inSEOReview', '', sum('inSEOReview'))}</td></tr>`;
+  $('approvedTitle').textContent = `Approved on ${new Date(q.since).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}`;
   $('approvedToday').innerHTML = TYPES.map(([k, label]) => `<tr><td>${label}</td><td class="n"><b>${link('approvedToday', k, q.approvedToday?.[k] ?? 0)}</b></td>
     <td class="n"><b>${q.submittedToday?.[k] ?? 0}</b></td></tr>`).join('')
     + `<tr class="total"><td>Total</td><td class="n">${link('approvedToday', '', sum('approvedToday'))}</td><td class="n">${sum('submittedToday')}</td></tr>`;
