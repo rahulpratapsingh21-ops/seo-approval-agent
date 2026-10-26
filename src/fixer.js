@@ -42,8 +42,9 @@ Write for Indian students and parents in clear, simple English. Follow every fie
 
 const plainText = ($) => $.root().text().replace(/\s+/g, ' ').trim();
 
+// Same markup as the CTA boxes in published articles: full-width grey box, border, centred heading.
 function ctaBlock(text) {
-  return `<table class="editor-table"><tbody><tr><th class="editor-table-cell-header"><h2 class="editor-heading-h2" dir="ltr"><a class="editor-link" rel="noreferrer" href="${CTA_URL}"><span style="white-space: pre-wrap;">☎️ ${text} ☎️</span></a></h2></th></tr></tbody></table>`;
+  return `<table><colgroup><col style="width: 1188px;"></colgroup><tbody><tr><th style="width: 75px; background-color: rgb(242, 243, 245); border: 1px solid black; vertical-align: top; text-align: start;"><h2 class="editor-heading-h2" dir="ltr" style="text-align: center;"><a href="${CTA_URL}" rel="noreferrer" class="editor-link"><span style="white-space: pre-wrap;">☎️ ${text} ☎️</span></a></h2></th></tr></tbody></table>`;
 }
 
 /**
@@ -82,6 +83,13 @@ function setCtaText($, a, text) {
  */
 function tidyCtas($, ctaText, primary, title, changes) {
   let changed = false;
+  // Narrow CTA boxes (a bare table without the editor's column width) → the full-width box, same text.
+  $('table').filter((_, t) => $(t).find('a[href*="syu-leads-form"]').length > 0 && !$(t).find('colgroup').length).each((_, t) => {
+    const text = ctaPlain($, $(t).find('a[href*="syu-leads-form"]').get(0));
+    $(t).replaceWith(ctaBlock(text));
+    changes.push(`CTA "${text}": full-width box`);
+    changed = true;
+  });
   $('a[href*="syu-leads-form"]').each((_, a) => {
     const old = ctaPlain($, a);
     const box = $(a).closest('h1, h2, h3, h4, p, th, td').get(0) || a;
@@ -110,6 +118,23 @@ function ctaGaps($) {
     if (!isGap($, $(t).next().get(0))) { $(t).after(GAP); added++; }
   });
   return added;
+}
+
+/**
+ * A paragraph or heading that is only a link ("Check the SSC June 2026 Exam Results here") gets 👉 in front.
+ * Links inside sentences, tables and CTAs are left as they are. Returns how many were marked.
+ */
+function pointLinks($) {
+  let marked = 0;
+  $('p, h2, h3, h4').each((_, p) => {
+    const a = $(p).find('a');
+    if (a.length !== 1 || /syu-leads-form/.test(a.attr('href') || '') || $(p).closest('table').length) return;
+    const pText = $(p).text().replace(/\s+/g, ' ').trim();
+    if (!pText || pText !== a.text().replace(/\s+/g, ' ').trim() || pText.includes('👉')) return;
+    a.before('<span style="white-space: pre-wrap;">👉 </span>');
+    marked++;
+  });
+  return marked;
 }
 
 const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -254,6 +279,8 @@ ${plainText($)}`,
   }
   const gaps = ctaGaps($);
   if (gaps) changes.push(`Added ${gaps} empty line(s) above/below CTAs`);
+  const pointed = pointLinks($);
+  if (pointed) changes.push(`Added 👉 before ${pointed} standalone link line(s)`);
 
   // 6. SEO fields. URL only for new pages; date is always today; writer only when missing.
   // Every change so far (links, alt text, CTAs) was to the article HTML.
@@ -378,13 +405,14 @@ ${text.slice(0, 40000)}`,
     changes.push(`Added ${k} CTA(s) in "${s.sectionDisplayTitle}": "☎️ ${plan.ctaText} ☎️"`);
   }
 
-  // Empty line above and below every CTA box.
-  for (const s of sections.filter((x) => /syu-leads-form/.test(x.content.html))) {
+  // Empty line above and below every CTA box; 👉 before standalone link lines.
+  for (const s of sections) {
     const $ = cheerio.load(s.content.html, null, false);
-    const gaps = ctaGaps($);
-    if (!gaps) continue;
+    const gaps = ctaGaps($), pointed = pointLinks($);
+    if (!gaps && !pointed) continue;
     s.content.html = $.html();
-    changes.push(`Added ${gaps} empty line(s) around CTAs in "${s.sectionDisplayTitle}"`);
+    if (gaps) changes.push(`Added ${gaps} empty line(s) around CTAs in "${s.sectionDisplayTitle}"`);
+    if (pointed) changes.push(`Added 👉 before ${pointed} link line(s) in "${s.sectionDisplayTitle}"`);
   }
 
   const fields = changes.length ? { [tabKey]: tab } : {};

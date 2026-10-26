@@ -67,9 +67,10 @@ export function runChecks(page, rules = {}) {
     const icons = [...boxes].find((b) => ($(b).text().match(/☎/g) || []).length > 2);
     const blank = (el) => !!el && el.tagName === 'p' && !$(el).text().trim() && !$(el).find('img').length;
     const tight = [...boxes].filter((b) => b.tagName === 'table' && !(blank($(b).prev().get(0)) && blank($(b).next().get(0)))).length;
-    add('cta-style', 'CTA short, one ☎️ each side, space around', long || icons || tight ? 'warn' : 'pass',
-      long ? `CTA is ${long.length} characters (max 60): "${long}"` : icons ? 'CTA has more than one phone icon on a side'
-        : tight ? `${tight} CTA box(es) without an empty line above and below` : 'OK');
+    const narrow = [...boxes].filter((b) => b.tagName === 'table' && !$(b).find('colgroup').length).length;
+    add('cta-style', 'CTA full width, short, one ☎️ each side, space around', long || icons || tight || narrow ? 'warn' : 'pass',
+      narrow ? `${narrow} CTA box(es) not full width` : long ? `CTA is ${long.length} characters (max 60): "${long}"`
+        : icons ? 'CTA has more than one phone icon on a side' : tight ? `${tight} CTA box(es) without an empty line above and below` : 'OK');
   }
 
   // 3. Meta title
@@ -126,6 +127,14 @@ export function runChecks(page, rules = {}) {
   const rivals = links.filter((h) => COMPETITORS.test(h));
   if (rivals.length) add('competitor-links', 'No competitor links', 'fail',
     `${rivals.length} link(s) to competitor sites: ${[...new Set(rivals.map((h) => h.match(COMPETITORS)[0]))].join(', ')}`);
+  // A line that is only a link ("Check the SSC Result here") starts with 👉.
+  const bare = $('p, h2, h3, h4').filter((_, p) => {
+    const a = $(p).find('a');
+    if (a.length !== 1 || CTA_FORM.test(a.attr('href') || '') || $(p).closest('table').length) return false;
+    const t = $(p).text().replace(/\s+/g, ' ').trim();
+    return !!t && t === a.text().replace(/\s+/g, ' ').trim() && !t.includes('👉');
+  }).length;
+  if (bare) add('link-pointer', '👉 before link lines', 'warn', `${bare} line(s) that are only a link without 👉`);
   const broken = links.filter((h) => !h.trim() || h.trim() === '#' || /^javascript:/i.test(h)).length;
   if (broken) add('empty-links', 'Empty links', 'fail', `${broken} link(s) with empty or "#" href`);
 
