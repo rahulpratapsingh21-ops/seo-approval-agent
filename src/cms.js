@@ -77,14 +77,21 @@ export async function countSubTasks(statuses = ['readyForSEOReview', 'inSEORevie
   return out;
 }
 
-/** Subtasks approved since a time (approved, or already published = completed), per content type. */
+/**
+ * Subtasks approved since a time (approved, or already published = completed): per content type,
+ * and per silo for colleges/exams/courses. Returns { types: { colleges: 9, … }, silos: { colleges: { overview: 3, … } } }.
+ */
 export async function countApprovedSince(since) {
-  const out = {};
-  await Promise.all(Object.keys(TYPES).map(async (type) => {
-    const j = await api(`/subTasks?${qs({ 'where[status][in]': 'approved,completed', 'where[contentCategory][equals]': type, 'where[updatedAt][greater_than_equal]': since, limit: 1, depth: 0 })}`);
-    out[type] = j.totalDocs;
-  }));
-  return out;
+  const j = await api(`/subTasks?${qs({ 'where[status][in]': 'approved,completed', 'where[contentCategory][in]': Object.keys(TYPES).join(','), 'where[updatedAt][greater_than_equal]': since, limit: 1000, depth: 0 })}`);
+  const types = Object.fromEntries(Object.keys(TYPES).map((t) => [t, 0]));
+  const silos = {};
+  for (const st of j.docs) {
+    types[st.contentCategory]++;
+    if (st.contentCategory === 'blogs') continue;
+    const silo = String(st.page || 'other').split(':').pop(); // "MBBS:courseDetails" → courseDetails
+    (silos[st.contentCategory] ??= {})[silo] = (silos[st.contentCategory][silo] || 0) + 1;
+  }
+  return { types, silos };
 }
 
 /** Latest saved draft for a subtask. */

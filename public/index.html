@@ -20,7 +20,8 @@
   .queue { position:sticky; top:16px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
   .queue h2 { margin:0 0 4px; } .queue table { border:0; } .queue td, .queue th { padding:7px 6px; }
   .queue td.n, .queue th.n { text-align:right; font-variant-numeric:tabular-nums; } .queue td.n b { font-size:17px; }
-  .queue tr.total td { border-bottom:0; font-weight:700; } .queue a { color:inherit; text-decoration:none; } .queue a:hover { color:var(--accent); }
+  .queue tr.total td { border-bottom:0; font-weight:700; }
+  .queue tr.silo td { font-size:13px; color:var(--muted); padding-top:4px; padding-bottom:4px; } .queue tr.silo td:first-child { padding-left:18px; } .queue a { color:inherit; text-decoration:none; } .queue a:hover { color:var(--accent); }
   @media (max-width:900px) { .layout { grid-template-columns:1fr; } .queue { position:static; order:-1; } }
   header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:16px; }
   h1 { font-size:22px; margin:0; } h2 { font-size:16px; margin:24px 0 10px; }
@@ -145,10 +146,11 @@ async function loadQueue() {
   const r = await fetch('api/counts');
   const q = await r.json();
   if (!r.ok) { $('queueAt').textContent = q.error; return; }
-  const link = (status, type, n) => {
+  const link = (status, type, n, silo = '') => {
     const where = (status === 'approvedToday'
       ? `where[status][in]=approved,completed&where[updatedAt][greater_than_equal]=${encodeURIComponent(q.since)}`
-      : `where[status][equals]=${status}`) + (type ? `&where[contentCategory][equals]=${type}` : '');
+      : `where[status][equals]=${status}`) + (type ? `&where[contentCategory][equals]=${type}` : '')
+      + (silo ? `&where[page][like]=${encodeURIComponent(silo)}` : '');
     return q.cmsUrl ? `<a href="${esc(q.cmsUrl)}/admin/collections/subTasks?${where}" target="_blank" rel="noopener">${n}</a>` : n;
   };
   const sum = (status) => TYPES.reduce((s, [k]) => s + (q[status]?.[k] || 0), 0);
@@ -157,8 +159,12 @@ async function loadQueue() {
     <td class="n"><b>${link('inSEOReview', k, q.inSEOReview?.[k] ?? 0)}</b></td></tr>`).join('')
     + `<tr class="total"><td>Total</td><td class="n">${link('readyForSEOReview', '', sum('readyForSEOReview'))}</td><td class="n">${link('inSEOReview', '', sum('inSEOReview'))}</td></tr>`;
   $('approvedTitle').textContent = `Approved on ${new Date(q.since).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}`;
+  // One row per type; colleges/exams/courses also list each approved silo (Overview, Admissions, …).
+  const siloName = (s) => s.replace(/([A-Z])/g, ' $1').replace(/\bAnd\b/g, '&').replace(/^./, (c) => c.toUpperCase());
   $('approvedToday').innerHTML = TYPES.map(([k, label]) => `<tr><td>${label}</td><td class="n"><b>${link('approvedToday', k, q.approvedToday?.[k] ?? 0)}</b></td>
-    <td class="n"><b>${q.submittedToday?.[k] ?? 0}</b></td></tr>`).join('')
+    <td class="n"><b>${q.submittedToday?.[k] ?? 0}</b></td></tr>`
+    + Object.entries(q.approvedSilos?.[k] || {}).sort((a, b) => b[1] - a[1]).map(([silo, n]) => `<tr class="silo"><td>${esc(siloName(silo))}</td>
+      <td class="n">${link('approvedToday', k, n, silo)}</td><td class="n">${q.submittedSilos?.[k]?.[silo] ?? 0}</td></tr>`).join('')).join('')
     + `<tr class="total"><td>Total</td><td class="n">${link('approvedToday', '', sum('approvedToday'))}</td><td class="n">${sum('submittedToday')}</td></tr>`;
   $('queueAt').textContent = `Updated ${new Date(q.at).toLocaleTimeString()} · click a number to open the list in the CMS`;
 }
