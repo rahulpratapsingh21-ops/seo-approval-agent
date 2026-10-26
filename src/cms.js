@@ -10,6 +10,7 @@ export const STATUS = {
 
 let token = null;
 let tokenAt = 0;
+export let me = null; // logged-in CMS user (used as SEO manager on new tasks)
 
 async function login() {
   const r = await fetch(`${BASE}/api/users/login`, {
@@ -21,6 +22,7 @@ async function login() {
   if (!j.token) throw new Error('CMS login failed: ' + (j.errors?.[0]?.message || r.status));
   token = j.token;
   tokenAt = Date.now();
+  me = j.user;
 }
 
 async function api(path, opts = {}) {
@@ -31,11 +33,20 @@ async function api(path, opts = {}) {
   });
   if (r.status === 401) { token = null; return api(path, opts); }
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.errors) throw new Error(`CMS ${opts.method || 'GET'} ${path}: ${j.errors?.[0]?.message || r.status}`);
+  if (!r.ok || j.errors) {
+    // Validation errors list each bad field — show them all so missing mandatory fields are obvious.
+    const fields = (j.errors || []).flatMap((e) => (e.data || []).map((d) => `${d.field}: ${d.message}`));
+    throw new Error(`CMS ${opts.method || 'GET'} ${path.split('?')[0]}: ${fields.length ? fields.join('; ') : j.errors?.[0]?.message || r.status}`);
+  }
   return j;
 }
 
-const qs = (o) => Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+/** Generic CMS calls for other modules (task creator). */
+export const cmsGet = (path) => api(path);
+export const cmsCreate = (collection, body) => api(`/${collection}`, { method: 'POST', body: JSON.stringify(body) }).then((j) => j.doc);
+export async function getMe() { if (!me) await login(); return me; }
+
+export const qs = (o) => Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 
 // Where each content type keeps its drafts, and which SEO rules apply to it.
 export const TYPES = {

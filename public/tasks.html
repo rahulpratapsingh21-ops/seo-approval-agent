@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create Tasks</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1b1f24; --muted:#667085; --line:#e4e7ec; --pass:#12805c; --pass-bg:#e7f6ef; --warn:#a15c00; --warn-bg:#fff4e0; --fail:#c0352b; --fail-bg:#fdecea; --accent:#d6246e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#121417; --card:#1b1e23; --text:#e8eaed; --muted:#98a2b3; --line:#2c3138; --pass:#4cc38a; --pass-bg:#16301f; --warn:#f0b54a; --warn-bg:#352a12; --fail:#f2766b; --fail-bg:#3a1c1a; --accent:#f05a9a; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:22px; margin:0; }
+  .nav { display:flex; gap:14px; margin:4px 0 14px; font-size:14px; }
+  .nav a { color:var(--muted); text-decoration:none; } .nav a.on { color:var(--accent); border-bottom:2px solid var(--accent); font-weight:600; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:12px; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
+  label { display:flex; flex-direction:column; gap:3px; font-size:13px; color:var(--muted); }
+  input, select, textarea { font:inherit; font-size:14px; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:7px 8px; }
+  textarea { resize:vertical; min-height:38px; width:100%; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:9px 16px; font-size:14px; font-weight:600; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--text); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:wait; }
+  .pill { font-size:12px; font-weight:700; padding:3px 9px; border-radius:99px; white-space:nowrap; }
+  .pass { color:var(--pass); background:var(--pass-bg); } .warn { color:var(--warn); background:var(--warn-bg); } .fail { color:var(--fail); background:var(--fail-bg); }
+  .item-head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }
+  .item-head b { font-size:16px; }
+  .msg { font-size:13px; margin:3px 0; } .msg.err { color:var(--fail); } .msg.wrn { color:var(--warn); }
+  table { width:100%; border-collapse:collapse; font-size:14px; margin-top:8px; }
+  td, th { text-align:left; padding:6px; border-top:1px solid var(--line); vertical-align:top; } th { color:var(--muted); font-size:12px; font-weight:600; }
+  td input[type=text] { width:100%; }
+  .silo-off td:not(:first-child) { opacity:.45; }
+  .muted { color:var(--muted); } .scroll { overflow-x:auto; }
+  .result { font-size:14px; } .result code { background:var(--bg); padding:1px 5px; border-radius:4px; }
+  .bar { position:sticky; bottom:0; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Create Tasks</h1>
+  <nav class="nav"><a href="./">SEO Review</a><a class="on" href="tasks.html">Create Tasks</a></nav>
+
+  <div class="card">
+    <div class="row">
+      <label>Sheet tab <select id="tab"><option>Loading…</option></select></label>
+      <label>Rows (e.g. 185 or 185-190 or 185, 190) <input id="rows" placeholder="185-190" size="22"></label>
+      <button id="preview">Preview</button>
+      <span class="muted" id="status"></span>
+    </div>
+    <div class="muted" style="margin-top:8px;font-size:13px">Row with <b>Live URL</b> → update task (silos and meta read from the live page). No Live URL → new task. Rows that already have a Task ID are skipped. Nothing is created until you click <b>Create</b>.</div>
+  </div>
+
+  <div id="items"></div>
+  <div class="bar" id="bar" hidden>
+    <button id="createAll">Create all ready rows</button>
+    <span class="muted" id="sheetInfo"></span>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+const api = async (url, body) => {
+  const r = await fetch(url, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+};
+let opts = null, items = [], tabs = [];
+const CATS = { blogs: 'Blog', colleges: 'College', exams: 'Exam', courses: 'Course' };
+
+(async () => {
+  try {
+    [tabs, opts] = await Promise.all([api('api/tc/tabs'), api('api/tc/options')]);
+    $('tab').innerHTML = tabs.map((t) => `<option value="${t.gid}">${esc(t.name)}</option>`).join('');
+    const saved = localStorage.getItem('tc-tab'); if (saved) $('tab').value = saved;
+    $('sheetInfo').textContent = opts.sheetWrite ? 'Task IDs will be written to the sheet automatically.' : 'Sheet writing not set up yet — copy Task IDs into the sheet yourself.';
+  } catch (e) { $('status').textContent = 'Error: ' + e.message; }
+})();
+
+$('preview').onclick = async () => {
+  const t = tabs.find((x) => x.gid === $('tab').value);
+  try { localStorage.setItem('tc-tab', t.gid); } catch {}
+  $('preview').disabled = true; $('status').textContent = 'Reading sheet and live pages…'; $('items').innerHTML = '';
+  try {
+    items = await api('api/tc/preview', { gid: t.gid, name: t.name, rows: $('rows').value });
+    render(); $('status').textContent = `${items.length} row(s)`;
+  } catch (e) { $('status').textContent = 'Error: ' + e.message; }
+  $('preview').disabled = false;
+};
+
+const userSel = (list, val, i, key) => `<select onchange="items[${i}].${key}=this.value"><option value="">—</option>${list.map((u) => `<option value="${u.id}" ${u.id === val ? 'selected' : ''}>${esc(u.email)}</option>`).join('')}</select>`;
+
+function render() {
+  $('items').innerHTML = items.map((it, i) => {
+    const blocked = it.errors.length > 0 && !it.done;
+    const head = `<div class="item-head"><b>Row ${it.row}</b><span>${esc(it.topic)}</span>
+      <span class="pill ${it.mode === 'update' ? 'warn' : 'pass'}">${it.mode === 'update' ? 'UPDATE' : 'NEW'} ${CATS[it.category] || ''}</span>
+      ${it.entity ? `<span class="muted">→ ${esc(it.entity.name)}</span>` : ''}${it.liveUrl ? `<a class="muted" href="${esc(it.liveUrl)}" target="_blank">live page</a>` : ''}</div>`;
+    const msgs = it.errors.map((e) => `<div class="msg err">✖ ${esc(e)}</div>`).join('') + it.warnings.map((w) => `<div class="msg wrn">⚠ ${esc(w)}</div>`).join('');
+    if (it.done) return `<div class="card">${head}${resultHtml(it.done)}</div>`;
+    if (blocked && (it.taskId || it.mode === 'update')) return `<div class="card">${head}${msgs}</div>`;
+
+    const newFields = it.mode !== 'new' ? '' : `<div class="row" style="margin-bottom:8px">
+      <label>Content type <select onchange="setCategory(${i}, this.value)">${Object.entries(CATS).map(([k, v]) => `<option value="${k}" ${k === it.category ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      ${it.category === 'blogs' ? `
+        <label>Blog type <select onchange="items[${i}].blog.blogType=this.value">${['general', 'exams', 'colleges', 'courses'].map((v) => `<option ${v === it.blog?.blogType ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+        <label>Blog category <select onchange="items[${i}].blog.category=[this.value]">${['latestNews', 'overview', 'miscellaneous'].map((v) => `<option ${it.blog?.category?.[0] === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+        <label>Page category <select onchange="items[${i}].blog.pageCategory=this.value"><option value="">— choose —</option>${opts.pageCategories.map((c) => `<option value="${c.id}" ${c.id === it.blog?.pageCategory ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>`
+      : `<label>Which ${CATS[it.category].toLowerCase()}? <span class="row"><input id="q${i}" value="${esc(it.entityQuery ?? it.topic)}" size="26"><button class="secondary" onclick="findEntity(${i})">Search</button></span></label>
+        <label>Match <select onchange="pickEntity(${i}, this.value)"><option value="">— search first —</option>${(it.entityOptions || []).map((e, k) => `<option value="${k}" ${it.entity?.id === e.id ? 'selected' : ''}>${esc(e.name)} (#${e.number})</option>`).join('')}</select></label>`}
+    </div>`;
+
+    const silos = `<div class="scroll"><table><thead><tr><th></th><th>Silo / subtask</th><th>Page URL</th><th>Meta title</th><th>Meta description</th></tr></thead><tbody>
+      ${(it.silos || []).map((s, k) => `<tr class="${s.selected ? '' : 'silo-off'}">
+        <td><input type="checkbox" ${s.selected ? 'checked' : ''} ${it.category === 'blogs' ? 'disabled' : ''} onchange="items[${i}].silos[${k}].selected=this.checked; render()"></td>
+        <td>${esc(s.label)}${s.liveUrl ? `<br><a class="muted" href="${esc(s.liveUrl)}" target="_blank">live</a>` : ''}</td>
+        <td><input type="text" value="${esc(s.pageUrl)}" onchange="items[${i}].silos[${k}].pageUrl=this.value"></td>
+        <td><textarea onchange="items[${i}].silos[${k}].metaTitle=this.value">${esc(s.metaTitle)}</textarea></td>
+        <td><textarea onchange="items[${i}].silos[${k}].metaDescription=this.value">${esc(s.metaDescription)}</textarea></td></tr>`).join('')}
+    </tbody></table></div>`;
+
+    return `<div class="card" id="item${i}">${head}${msgs}${newFields}
+      <div class="row"><label>Writer ${userSel(opts.writers, it.writerId, i, 'writerId')}</label><label>Editor ${userSel(opts.editors, it.editorId, i, 'editorId')}</label></div>
+      ${silos}
+      <div class="row" style="margin-top:10px"><button onclick="createOne(${i}, this)" ${it.taskId ? 'disabled' : ''}>Create task</button><span class="muted" id="err${i}"></span></div></div>`;
+  }).join('');
+  $('bar').hidden = !items.some((it) => !it.done && !it.taskId && !(it.errors.length && it.mode === 'update'));
+}
+
+function resultHtml(d) {
+  const subs = d.subtasks.map((s) => s.error ? `<div class="msg err">✖ ${esc(s.silo)}: ${esc(s.error)}</div>` : `<div>✔ Subtask <code>${s.subTaskId}</code> — ${esc(s.silo)}</div>`).join('');
+  const sheet = d.sheet?.ok ? `✔ Task ID written to sheet (${esc(d.sheet.cell)})` : `<span class="msg wrn">⚠ Sheet not updated: ${esc(d.sheet?.error)} — copy <code>${d.taskId}</code> into the sheet</span>`;
+  return `<div class="result"><div><span class="pill pass">CREATED</span> Task ID <code>${d.taskId}</code></div>${subs}<div>${sheet}</div></div>`;
+}
+
+async function setCategory(i, cat) {
+  const it = items[i]; it.category = cat; it.entity = null; it.entityOptions = [];
+  it.silos = await api('api/tc/silos', { category: cat, topic: it.topic, entity: null });
+  if (cat !== 'blogs') await findEntity(i, it.topic); else render();
+}
+async function findEntity(i, q) {
+  const it = items[i]; it.entityQuery = q ?? $('q' + i).value;
+  it.entityOptions = await api(`api/tc/entities?category=${it.category}&q=${encodeURIComponent(it.entityQuery)}`);
+  if (it.entityOptions.length === 1) return pickEntity(i, 0);
+  render();
+}
+async function pickEntity(i, k) {
+  const it = items[i]; it.entity = it.entityOptions[k] || null;
+  if (it.entity) it.silos = await api('api/tc/silos', { category: it.category, topic: it.topic, entity: it.entity });
+  render();
+}
+async function createOne(i, btn) {
+  const it = items[i];
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  try { it.done = await api('api/tc/create', it); render(); return true; }
+  catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Create task'; } const el = $('err' + i); if (el) { el.className = 'msg err'; el.textContent = '✖ ' + e.message; } return false; }
+}
+$('createAll').onclick = async () => {
+  const ready = items.map((it, i) => i).filter((i) => !items[i].done && !items[i].taskId && !(items[i].errors.length && items[i].mode === 'update'));
+  if (!confirm(`Create ${ready.length} task(s) in the CMS now?`)) return;
+  $('createAll').disabled = true;
+  for (const i of ready) await createOne(i, document.querySelector(`#item${i} button[onclick^="createOne"]`));
+  $('createAll').disabled = false;
+};
+</script>
+</body>
+</html>
