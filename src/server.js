@@ -19,6 +19,18 @@ const settings = { everyMinutes: Number(process.env.RUN_EVERY_MINUTES || 15), pa
 try { Object.assign(settings, JSON.parse(readFileSync(SETTINGS_FILE, 'utf8'))); } catch { /* first start */ }
 const saveSettings = () => { mkdirSync(DATA_DIR, { recursive: true }); writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2)); };
 
+// Every approval made with Submit, for the "Via Submit" count (kept across restarts, last 2,000).
+const SUBMITS_FILE = `${DATA_DIR}/submits.json`;
+let submits = [];
+try { submits = JSON.parse(readFileSync(SUBMITS_FILE, 'utf8')); } catch { /* none yet */ }
+const recordSubmit = (entry) => {
+  submits = [entry, ...submits].slice(0, 2000);
+  mkdirSync(DATA_DIR, { recursive: true });
+  writeFileSync(SUBMITS_FILE, JSON.stringify(submits));
+};
+const submittedSince = (since) => submits.filter((s) => s.at >= since)
+  .reduce((m, s) => ({ ...m, [s.type]: (m[s.type] || 0) + 1 }), {});
+
 // Dashboard login (browser pop-up). Cron services can call /api/run?key=RUN_KEY instead.
 app.use((req, res, next) => {
   if (req.path === '/health') return next();
@@ -78,7 +90,8 @@ app.get('/api/counts', async (_, res) => {
       const [queue, approvedToday] = await Promise.all([countSubTasks(), countApprovedSince(since)]);
       counts = { at: Date.now(), data: { ...queue, approvedToday, since } };
     }
-    res.json({ ...counts.data, at: new Date(counts.at), cmsUrl: process.env.CMS_URL });
+    // Submits are local, so always fresh (not cached).
+    res.json({ ...counts.data, submittedToday: submittedSince(counts.data.since), at: new Date(counts.at), cmsUrl: process.env.CMS_URL });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.all('/api/run', async (req, res) => res.json(await run(req.query.key ? 'cron' : 'manual')));
@@ -116,7 +129,9 @@ app.post('/api/fix/:id', async (req, res) => {
 app.post('/api/submit/:id', async (req, res) => {
   if (DRY_RUN) return res.status(400).json({ error: 'Test mode (DRY_RUN=true) — set DRY_RUN=false in .env to submit to the CMS' });
   try {
-    const out = await submitSubTask(await getSubTask(req.params.id));
+    const st = await getSubTask(req.params.id);
+    const out = await submitSubTask(st);
+    recordSubmit({ at: new Date().toISOString(), subTaskId: out.subTaskId, type: st.contentCategory });
     const r = state.lastResults.find((x) => x.id === req.params.id);
     if (r) r.action = 'fixed & approved';
     state.log.unshift({ at: new Date(), trigger: 'manual', subTaskId: out.subTaskId, title: r?.title, action: 'fixed & approved' });
