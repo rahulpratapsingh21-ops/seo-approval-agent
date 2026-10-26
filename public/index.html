@@ -94,7 +94,7 @@ async function load() {
     const cls = x.action === 'error' ? 'fail' : res.status;
     return `<details class="item" data-id="${x.id}"><summary>
       <span class="pill ${cls}">${x.action === 'error' ? 'ERROR' : res.status.toUpperCase()}</span>
-      <span class="title">${esc(x.title)}<small>${esc(x.type || '')}${x.tab ? ' › ' + esc(x.tab) : ''} · Task #${esc(x.subTaskId)} · /${esc(x.pageUrl || '')} · CTA ${res.ctaCount ?? '—'} · ${res.words ?? '—'} words</small></span>
+      <span class="title">${esc(x.title)}<small>${x.isUpdate ? '<b>Update task</b> (URL kept)' : x.result ? '<b>New page</b>' : ''} · ${esc(x.type || '')}${x.tab ? ' › ' + esc(x.tab) : ''} · Task #${esc(x.subTaskId)} · /${esc(x.pageUrl || '')} · CTA ${res.ctaCount ?? '—'} · ${res.words ?? '—'} words</small></span>
       <span class="muted">${res.score ?? ''}</span>${actionPill(x.action)}
     </summary><div class="checks">${x.error ? esc(x.error) : res.checks.map((k) =>
       `<div class="check"><span class="pill ${k.level}">${k.level}</span><span><b>${esc(k.label)}</b> — ${esc(k.detail)}</span></div>`).join('')}</div>${fixPanel(x)}</details>`;
@@ -112,7 +112,7 @@ function fixPanel(x) {
   const again = `<button class="small" onclick="fixNow('${x.id}', this)">${f ? 'Fix again' : 'Fix with AI'}</button>`;
   if (!f) return `<div class="fix">${again}</div>`;
   if (f.error) return `<div class="fix"><b>Auto-fix</b><div class="fail-text">${esc(f.error)}</div>${again}</div>`;
-  const fields = [['H1', 'title'], ['Meta title', 'metaTitle'], ['Meta description', 'metaDescription'], ['URL', 'pageUrl'], ['Article HTML', 'html']];
+  const fields = [['Meta title', 'metaTitle'], ['Meta description', 'metaDescription'], ['URL', 'pageUrl'], ['Date', 'date'], ['Writer', 'authorName'], ['Article HTML', 'html']];
   return `<div class="fix">
     <div class="fix-head"><b>Auto-fix</b><span>Score ${f.before.score} → <b>${f.after.score}</b></span>
       <span class="pill ${f.after.status}">${f.after.status === 'pass' ? 'PASSES AFTER FIX' : 'STILL NEEDS WORK'}</span>

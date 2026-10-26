@@ -16,6 +16,16 @@ const toList = (v) => {
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 const has = (text, kw) => !!kw && norm(text).includes(norm(kw));
 
+/** CTA text that names none of the article's topic words (CBSE article → CBSE CTA, CAT article → CAT CTA). */
+export function ctaOffTopic(ctaText, primary, title) {
+  const topicWords = norm(`${primary || ''} ${title || ''}`).split(' ').filter((w) => w.length > 2 && !STOP.has(w) && !/^\d+$/.test(w));
+  return !topicWords.some((w) => norm(ctaText).split(' ').includes(w));
+}
+
+/** Today's date in India (YYYY-MM-DD); the CMS stores dates as IST midnight. */
+export const todayIST = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+const dayIST = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
 /**
  * Runs the SEO checklist on one blog page.
  * page: { title, metaTitle, metaDescription, primaryKeywords, secondaryKeywords, pageUrl, html, heroImage }
@@ -45,8 +55,7 @@ export function runChecks(page, rules = {}) {
 
   // 2. CTA text should be about this article's topic (CBSE article → CBSE CTA, CAT article → CAT CTA).
   if (ctaCount && r.requireCta !== false) {
-    const topicWords = norm(`${primary} ${page.title || ''}`).split(' ').filter((w) => w.length > 2 && !STOP.has(w) && !/^\d+$/.test(w));
-    const off = ctaTexts.filter((t) => !topicWords.some((w) => norm(t).split(' ').includes(w)));
+    const off = ctaTexts.filter((t) => ctaOffTopic(t, primary, page.title));
     add('cta-topic', 'CTA text matches article topic', off.length ? 'warn' : 'pass',
       off.length ? `CTA may be copied from another article: "${off[0]}"` : 'CTA text mentions the article topic');
   }
@@ -82,6 +91,9 @@ export function runChecks(page, rules = {}) {
   add('h2', 'H2 subheadings', h2 >= 2 ? 'pass' : 'fail', `${h2} H2 heading(s) (excluding CTAs)`);
   const h1 = $('h1').length;
   if (h1) add('h1', 'No extra H1 in body', 'warn', `${h1} H1 in body — page title is already the H1`);
+  // The agent never edits the H1, so a stale year there is for the writer to fix.
+  const staleYear = (String(page.title || '').match(/\b20\d\d\b/g) || []).find((y) => !bodyText.includes(y));
+  if (staleYear) add('h1-year', 'H1 year matches content', 'warn', `H1 says ${staleYear} but the article never mentions it — writer to update the H1`);
 
   // 7. Length
   add('words', 'Word count', words >= r.minWords ? 'pass' : words >= r.minWords / 2 ? 'warn' : 'fail',
@@ -105,14 +117,21 @@ export function runChecks(page, rules = {}) {
   const broken = links.filter((h) => !h.trim() || h.trim() === '#' || /^javascript:/i.test(h)).length;
   if (broken) add('empty-links', 'Empty links', 'fail', `${broken} link(s) with empty or "#" href`);
 
-  // 10. URL slug
+  // 10. URL slug — an update task's page is already live, so its URL is never changed.
   const slug = (page.pageUrl || '').split('/').filter(Boolean).pop() || '';
-  if (!slug) add('slug', 'URL slug', 'fail', 'Page URL is empty');
+  if (page.isUpdate) add('slug', 'URL slug', 'pass', `Update task — URL kept as is${page.liveUrl ? ` (live: ${page.liveUrl})` : ''}`);
+  else if (!slug) add('slug', 'URL slug', 'fail', 'Page URL is empty');
   else add('slug', 'URL slug', /^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug) && slug.length <= 75 ? 'pass' : 'warn',
     `/${slug}` + (/[A-Z_ ]/.test(slug) ? ' — use lowercase and hyphens only' : ''));
 
   // 11. Hero image
   if (r.images && 'heroImage' in page) add('hero', 'Hero image', page.heroImage ? 'pass' : 'warn', page.heroImage ? 'Set' : 'No hero image');
+
+  // 12. Date must be today; writer name must be set (blogs).
+  if ('date' in page) add('date', 'Date is today', page.date && dayIST(page.date) === todayIST() ? 'pass' : 'fail',
+    page.date ? `Date ${dayIST(page.date)} (today ${todayIST()})` : 'No date set');
+  if ('authorName' in page) add('writer', 'Writer name', (page.authorName || '').trim() ? 'pass' : 'fail',
+    (page.authorName || '').trim() || 'No writer name');
 
   const fails = checks.filter((c) => c.level === 'fail').length;
   const warns = checks.filter((c) => c.level === 'warn').length;

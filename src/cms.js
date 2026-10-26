@@ -135,6 +135,38 @@ export function tabHtml(draft, page) {
   return parts.join('\n');
 }
 
+/** Parent task of a subtask; updateData: true marks an update of an existing page. */
+export async function getTask(id) {
+  return id ? api(`/tasks/${id}?depth=0`).catch(() => null) : null;
+}
+
+/** CMS user's display name (the subtask's content writer). */
+export async function getUserName(id) {
+  if (!id) return null;
+  const u = await api(`/users/${id}?depth=0`).catch(() => null);
+  return u ? (u.name || [u.firstName, u.lastName].filter(Boolean).join(' ') || null) : null;
+}
+
+// The website answers 200 for every path; missing pages show "Page Not Found".
+const SITE = 'https://www.selectyouruniversity.com';
+const liveCache = new Map();
+/** Live URL of a slug on the website (blog, college, exam or course), or null if it is a new page. */
+export async function findLivePage(pageUrl) {
+  const slug = String(pageUrl || '').split('/').filter(Boolean).pop();
+  if (!slug) return null;
+  const hit = liveCache.get(slug);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.url;
+  let url = null;
+  for (const section of ['blog', 'college', 'exam', 'course']) {
+    try {
+      const r = await fetch(`${SITE}/${section}/${slug}`);
+      if (r.ok && !/Page Not Found/i.test(await r.text())) { url = `${SITE}/${section}/${slug}`; break; }
+    } catch { /* site unreachable: try next */ }
+  }
+  liveCache.set(slug, { at: Date.now(), url });
+  return url;
+}
+
 export async function getSubTask(id) {
   return api(`/subTasks/${id}?depth=0`);
 }

@@ -1,4 +1,4 @@
-import { listSubTasks, getDraft, getSubTask, setSubTaskStatus, tabHtml, STATUS, TYPES } from './cms.js';
+import { listSubTasks, getDraft, getSubTask, setSubTaskStatus, tabHtml, getTask, findLivePage, getUserName, STATUS, TYPES } from './cms.js';
 import { runChecks, reviewMessage } from './checks.js';
 import { rulesFor } from './benchmarks.js';
 import { fixBlog, FIX_DIR } from './fixer.js';
@@ -21,9 +21,13 @@ export async function checkSubTask(st) {
     pageUrl: draft.pageUrl || st.pageUrl,
     html: isBlog ? draft.html : tabHtml(draft, st.page),
   };
-  if (isBlog) page.heroImage = draft.heroImage;
+  if (isBlog) Object.assign(page, { heroImage: draft.heroImage, date: draft.date, authorName: draft.authorName });
+  // Update task = the parent task says so, or the URL is already live on the website.
+  const [task, liveUrl] = await Promise.all([getTask(st.parentTaskId), findLivePage(page.pageUrl)]);
+  page.liveUrl = liveUrl;
+  page.isUpdate = !!(liveUrl || task?.updateData);
   const rules = await rulesFor(type, st.page);
-  return { ...base, title: page.title, pageUrl: page.pageUrl, rules, result: runChecks(page, rules) };
+  return { ...base, title: page.title, pageUrl: page.pageUrl, isUpdate: page.isUpdate, liveUrl, rules, result: runChecks(page, rules) };
 }
 
 export async function checkAll() {
@@ -48,8 +52,9 @@ export async function fixSubTask(st, { force = false } = {}) {
   if (!force && old?.draftSavedAt === draft._savedAt && !old.error) return old;
   let fix;
   try {
-    const before = (await checkSubTask(st)).result;
-    fix = { ...(await fixBlog(st, draft, before)), draftSavedAt: draft._savedAt };
+    const item = await checkSubTask(st);
+    const writer = draft.authorName ? null : await getUserName(st.contentWriter);
+    fix = { ...(await fixBlog(st, draft, item.result, { isUpdate: item.isUpdate, liveUrl: item.liveUrl, writer })), draftSavedAt: draft._savedAt };
   } catch (e) {
     fix = { error: e.message, draftSavedAt: draft._savedAt, at: new Date().toISOString() };
   }
