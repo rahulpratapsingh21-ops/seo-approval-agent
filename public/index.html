@@ -88,6 +88,7 @@
       <div class="muted" id="queueAt" style="font-size:13px">Loading…</div>
       <table><thead><tr><th>Type</th><th class="n">Ready for SEO review</th><th class="n">In SEO review</th></tr></thead><tbody id="queue"></tbody></table>
       <h2 style="margin-top:18px" id="approvedTitle">Approved</h2>
+      <div class="filters" id="dayButtons" style="margin:6px 0 4px"></div>
       <table><thead><tr><th>Type</th><th class="n">Approved in CMS</th><th class="n">Via Submit</th></tr></thead><tbody id="approvedToday"></tbody></table>
     </aside>
   </div>
@@ -144,33 +145,46 @@ async function load() {
 // Right panel: how many subtasks wait in each SEO status, per type; each number opens that list in the CMS.
 const TYPES = [['blogs', 'Blogs'], ['colleges', 'Colleges'], ['exams', 'Exams'], ['courses', 'Courses']];
 const PAGE_LABEL = { colleges: 'College course pages', courses: 'Course specialisation pages' };
+let dayIndex = 0, lastQueue = null;
+function setDay(i) { dayIndex = i; if (lastQueue) loadQueue(); }
 async function loadQueue() {
   const r = await fetch('api/counts');
   const q = await r.json();
   if (!r.ok) { $('queueAt').textContent = q.error; return; }
+  lastQueue = q;
+  const day = q.days?.[dayIndex] || q.days?.[0];
   const link = (status, type, n, silo = '') => {
-    const where = (status === 'approvedToday'
-      ? `where[status][in]=approved,completed&where[updatedAt][greater_than_equal]=${encodeURIComponent(q.since)}`
-      : `where[status][equals]=${status}`) + (type ? `&where[contentCategory][equals]=${type}` : '')
-      + (silo ? `&where[page][like]=${encodeURIComponent(silo)}` : '');
+    // Explicit "and" so both date limits apply in the CMS list.
+    const parts = status === 'approved'
+      ? ['[status][in]=approved,completed', `[updatedAt][greater_than_equal]=${encodeURIComponent(day.since)}`, `[updatedAt][less_than]=${encodeURIComponent(day.until)}`]
+      : [`[status][equals]=${status}`];
+    if (type) parts.push(`[contentCategory][equals]=${type}`);
+    if (silo) parts.push(`[page][like]=${encodeURIComponent(silo)}`);
+    const where = parts.map((p, i) => `where[and][${i}]${p}`).join('&');
     return q.cmsUrl ? `<a href="${esc(q.cmsUrl)}/admin/collections/subTasks?${where}" target="_blank" rel="noopener">${n}</a>` : n;
   };
-  const sum = (status) => TYPES.reduce((s, [k]) => s + (q[status]?.[k] || 0), 0);
+  const total = (m) => TYPES.reduce((s, [k]) => s + (m?.[k] || 0), 0);
+  const sum = (status) => total(q[status]);
   $('queue').innerHTML = TYPES.map(([k, label]) => `<tr><td>${label}</td>
     <td class="n"><b>${link('readyForSEOReview', k, q.readyForSEOReview?.[k] ?? 0)}</b></td>
     <td class="n"><b>${link('inSEOReview', k, q.inSEOReview?.[k] ?? 0)}</b></td></tr>`).join('')
     + `<tr class="total"><td>Total</td><td class="n">${link('readyForSEOReview', '', sum('readyForSEOReview'))}</td><td class="n">${link('inSEOReview', '', sum('inSEOReview'))}</td></tr>`;
-  $('approvedTitle').textContent = `Approved on ${new Date(q.since).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}`;
+  // Approved: today and the 2 days before; a button per day.
+  const dateLabel = (d, opts) => new Date(`${d}T12:00:00+05:30`).toLocaleDateString('en-GB', { ...opts, timeZone: 'Asia/Kolkata' });
+  $('dayButtons').innerHTML = (q.days || []).map((d, i) =>
+    `<button class="${i === dayIndex ? 'on' : ''}" onclick="setDay(${i})">${i === 0 ? 'Today' : dateLabel(d.date, { day: 'numeric', month: 'short' })}</button>`).join('');
+  $('approvedTitle').textContent = `Approved on ${dateLabel(day.date, { day: 'numeric', month: 'short', year: 'numeric' })}`;
   // One row per type; colleges/exams/courses also list each approved silo (Overview, Admissions, …).
+  const a = day.approved, sub = day.submitted;
   const siloName = (s) => s.replace(/([A-Z])/g, ' $1').replace(/\bAnd\b/g, '&').replace(/^./, (c) => c.toUpperCase());
-  $('approvedToday').innerHTML = TYPES.map(([k, label]) => `<tr><td>${label}</td><td class="n"><b>${link('approvedToday', k, q.approvedToday?.[k] ?? 0)}</b></td>
-    <td class="n"><b>${q.submittedToday?.[k] ?? 0}</b></td></tr>`
-    + Object.entries(q.approvedSilos?.[k] || {}).sort((a, b) => b[1] - a[1]).map(([silo, n]) => `<tr class="silo"><td>${esc(siloName(silo))}</td>
-      <td class="n">${link('approvedToday', k, n, silo)}</td><td class="n">${q.submittedSilos?.[k]?.[silo] ?? 0}</td></tr>`).join('')
+  $('approvedToday').innerHTML = TYPES.map(([k, label]) => `<tr><td>${label}</td><td class="n"><b>${link('approved', k, a.types?.[k] ?? 0)}</b></td>
+    <td class="n"><b>${sub.types?.[k] ?? 0}</b></td></tr>`
+    + Object.entries(a.silos?.[k] || {}).sort((x, y) => y[1] - x[1]).map(([silo, n]) => `<tr class="silo"><td>${esc(siloName(silo))}</td>
+      <td class="n">${link('approved', k, n, silo)}</td><td class="n">${sub.silos?.[k]?.[silo] ?? 0}</td></tr>`).join('')
     // Pages for one course inside a college / one specialisation inside a course: not silos, shown apart.
-    + (q.approvedPages?.[k] ? `<tr class="item"><td>${PAGE_LABEL[k] || `${label} item pages`} <span class="muted">(not silos)</span></td>
-      <td class="n"><b>${q.approvedPages[k]}</b></td><td class="n"><b>${q.submittedPages?.[k] ?? 0}</b></td></tr>` : '')).join('')
-    + `<tr class="total"><td>Total</td><td class="n">${link('approvedToday', '', sum('approvedToday') + sum('approvedPages'))}</td><td class="n">${sum('submittedToday') + sum('submittedPages')}</td></tr>`;
+    + (a.pages?.[k] ? `<tr class="item"><td>${PAGE_LABEL[k] || `${label} item pages`} <span class="muted">(not silos)</span></td>
+      <td class="n"><b>${a.pages[k]}</b></td><td class="n"><b>${sub.pages?.[k] ?? 0}</b></td></tr>` : '')).join('')
+    + `<tr class="total"><td>Total</td><td class="n">${link('approved', '', total(a.types) + total(a.pages))}</td><td class="n">${total(sub.types) + total(sub.pages)}</td></tr>`;
   $('queueAt').textContent = `Updated ${new Date(q.at).toLocaleTimeString()} · click a number to open the list in the CMS`;
 }
 

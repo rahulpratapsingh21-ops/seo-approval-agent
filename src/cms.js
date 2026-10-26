@@ -83,8 +83,10 @@ export async function countSubTasks(statuses = ['readyForSEOReview', 'inSEORevie
  * or one specialisation inside a course ("General:specialisation") are not silos: counted under `pages`.
  * Returns { types: { colleges: 8, … }, silos: { colleges: { overview: 5, … } }, pages: { colleges: 1 } }.
  */
-export async function countApprovedSince(since) {
-  const j = await api(`/subTasks?${qs({ 'where[status][in]': 'approved,completed', 'where[contentCategory][in]': Object.keys(TYPES).join(','), 'where[updatedAt][greater_than_equal]': since, limit: 1000, depth: 0 })}`);
+export async function countApprovedSince(since, until = null) {
+  // Explicit "and": two operators on the same field (updatedAt ≥ since and < until) are not combined otherwise.
+  const j = await api(`/subTasks?${qs({ 'where[and][0][status][in]': 'approved,completed', 'where[and][1][contentCategory][in]': Object.keys(TYPES).join(','),
+    'where[and][2][updatedAt][greater_than_equal]': since, ...(until && { 'where[and][3][updatedAt][less_than]': until }), limit: 1000, depth: 0 })}`);
   const types = Object.fromEntries(Object.keys(TYPES).map((t) => [t, 0]));
   const silos = {}, pages = {};
   for (const st of j.docs) {

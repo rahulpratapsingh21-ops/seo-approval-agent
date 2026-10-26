@@ -30,10 +30,25 @@ const recordSubmit = (entry) => {
 };
 // Per type (silos only), per silo, and per-course/specialisation pages — same split as the CMS counts.
 const countBy = (list, key) => list.reduce((m, s) => ({ ...m, [key(s)]: (m[key(s)] || 0) + 1 }), {});
-const submittedSince = (since) => countBy(submits.filter((s) => s.at >= since && !s.page), (s) => s.type);
-const submittedPagesSince = (since) => countBy(submits.filter((s) => s.at >= since && s.page), (s) => s.type);
-const submittedSilosSince = (since) => submits.filter((s) => s.at >= since && s.silo)
-  .reduce((m, s) => ({ ...m, [s.type]: { ...m[s.type], [s.silo]: (m[s.type]?.[s.silo] || 0) + 1 } }), {});
+function submittedIn({ since, until }) {
+  const list = submits.filter((s) => s.at >= since && s.at < until);
+  return {
+    types: countBy(list.filter((s) => !s.page), (s) => s.type),
+    pages: countBy(list.filter((s) => s.page), (s) => s.type),
+    silos: list.filter((s) => s.silo).reduce((m, s) => ({ ...m, [s.type]: { ...m[s.type], [s.silo]: (m[s.type]?.[s.silo] || 0) + 1 } }), {}),
+  };
+}
+
+/** Today and the 2 days before, as India-time day ranges: [{ date: "2026-10-26", since, until }]. */
+function lastDays(n = 3) {
+  const DAY = 24 * 60 * 60 * 1000;
+  const start = Date.parse(`${todayIST()}T00:00:00+05:30`);
+  return Array.from({ length: n }, (_, i) => ({
+    date: new Date(start - i * DAY + 12 * 60 * 60 * 1000).toISOString().slice(0, 10),
+    since: new Date(start - i * DAY).toISOString(),
+    until: new Date(start - (i - 1) * DAY).toISOString(),
+  }));
+}
 
 // Dashboard login (browser pop-up). Cron services can call /api/run?key=RUN_KEY instead.
 app.use((req, res, next) => {
@@ -90,13 +105,13 @@ let counts = { at: 0, data: null };
 app.get('/api/counts', async (_, res) => {
   try {
     if (Date.now() - counts.at > 60000) {
-      const since = new Date(`${todayIST()}T00:00:00+05:30`).toISOString();
-      const [queue, approved] = await Promise.all([countSubTasks(), countApprovedSince(since)]);
-      counts = { at: Date.now(), data: { ...queue, approvedToday: approved.types, approvedSilos: approved.silos, approvedPages: approved.pages, since } };
+      const days = lastDays();
+      const [queue, ...approved] = await Promise.all([countSubTasks(), ...days.map((d) => countApprovedSince(d.since, d.until))]);
+      counts = { at: Date.now(), data: { ...queue, days: days.map((d, i) => ({ ...d, approved: approved[i] })) } };
     }
     // Submits are local, so always fresh (not cached).
-    res.json({ ...counts.data, submittedToday: submittedSince(counts.data.since), submittedSilos: submittedSilosSince(counts.data.since),
-      submittedPages: submittedPagesSince(counts.data.since), at: new Date(counts.at), cmsUrl: process.env.CMS_URL });
+    const days = counts.data.days.map((d) => ({ ...d, submitted: submittedIn(d) }));
+    res.json({ ...counts.data, days, at: new Date(counts.at), cmsUrl: process.env.CMS_URL });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.all('/api/run', async (req, res) => res.json(await run(req.query.key ? 'cron' : 'manual')));
