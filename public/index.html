@@ -38,6 +38,10 @@
   .copy > div { display:flex; gap:8px; align-items:center; padding:5px 0; border-top:1px solid var(--line); font-size:14px; }
   .copy span { width:130px; flex:none; color:var(--muted); } .copy code { flex:1; min-width:0; overflow-wrap:anywhere; }
   .fail-text { color:var(--fail); margin:6px 0; }
+  .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin-bottom:12px; }
+  .controls input { width:72px; padding:7px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--text); font-size:15px; }
+  button.secondary { background:transparent; color:var(--text); border:1px solid var(--line); padding:8px 14px; }
+  button.danger { color:var(--fail); border-color:var(--fail); }
 </style>
 </head>
 <body>
@@ -46,6 +50,13 @@
     <div><h1>SEO Approval Agent</h1><div class="muted" id="cfg"></div></div>
     <button id="run">Run now</button>
   </header>
+  <div class="controls">
+    <button id="pause" class="secondary">Pause auto-check</button>
+    <label>Check every <input id="every" type="number" min="1" max="1440" step="1"> minutes</label>
+    <button id="saveEvery" class="secondary">Save</button>
+    <button id="clear" class="secondary danger">Clear history</button>
+    <span id="msg" class="muted"></span>
+  </div>
   <div class="stats" id="stats"></div>
   <h2>Last run — articles checked</h2>
   <div id="items"></div>
@@ -61,10 +72,13 @@ const actionPill = (a) => `<span class="pill ${a === 'approved' ? 'pass' : a ===
 async function load() {
   const s = await (await fetch('api/state')).json();
   const c = s.config;
-  $('cfg').textContent = `Checks "${c.pickUp.join(', ')}" every ${c.everyMinutes} min → pass: ${c.approve}, fail: ${c.reject}${c.dryRun ? ' · DRY RUN (no CMS changes)' : ''}`;
+  $('cfg').textContent = `Checks "${c.pickUp.join(', ')}" ${c.paused ? '· AUTO-CHECK PAUSED' : `every ${c.everyMinutes} min`} → pass: ${c.approve}, fail: ${c.reject}${c.dryRun ? ' · DRY RUN (no CMS changes)' : ''}`;
+  paused = c.paused;
+  $('pause').textContent = paused ? 'Resume auto-check' : 'Pause auto-check';
+  if (document.activeElement !== $('every')) $('every').value = c.everyMinutes;
   const r = s.lastResults || [];
   $('stats').innerHTML = [
-    ['Status', s.running ? 'Running…' : 'Idle'],
+    ['Status', s.running ? 'Running…' : paused ? 'Paused' : 'Idle'],
     ['Last run', t(s.lastRun?.at)],
     ['Next run', t(s.nextRun)],
     ['Checked', r.length],
@@ -117,7 +131,23 @@ async function fixNow(id, btn) {
   open.forEach((o) => document.querySelector(`details[data-id="${o}"]`)?.setAttribute('open', ''));
 }
 
-$('run').onclick =async () => { $('run').disabled = true; $('run').textContent = 'Running…'; await fetch('api/run', { method: 'POST' }); $('run').textContent = 'Run now'; load(); };
+let paused = false;
+const flash = (m) => { $('msg').textContent = m; setTimeout(() => ($('msg').textContent = ''), 3000); };
+async function saveSettings(body) {
+  const r = await fetch('api/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) return flash(j.error);
+  await load();
+  return j;
+}
+$('pause').onclick = async () => { const j = await saveSettings({ paused: !paused }); if (j) flash(j.paused ? 'Auto-check paused. Run now still works.' : 'Auto-check resumed.'); };
+$('saveEvery').onclick = async () => { const j = await saveSettings({ everyMinutes: $('every').value }); if (j) flash(`Will check every ${j.everyMinutes} minutes.`); };
+$('clear').onclick = async () => {
+  if (!confirm('Clear all previous results, the activity log and saved AI fixes?')) return;
+  await fetch('api/clear', { method: 'POST' }); await load(); flash('History cleared.');
+};
+
+$('run').onclick = async () => { $('run').disabled = true; $('run').textContent = 'Running…'; await fetch('api/run', { method: 'POST' }); $('run').textContent = 'Run now'; load(); };
 load(); setInterval(() => { if (!document.querySelector('details[open]')) load(); }, 15000);
 </script>
 </body>

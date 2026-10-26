@@ -1,14 +1,22 @@
 import 'dotenv/config';
 import express from 'express';
 import { fileURLToPath } from 'node:url';
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { runAgent, checkSubTask, fixSubTask } from './agent.js';
 import { FIX_DIR } from './fixer.js';
 import { getSubTask, STATUS } from './cms.js';
 
 const app = express();
+app.use(express.json());
 const PORT = process.env.PORT || 3000;
-const EVERY_MIN = Number(process.env.RUN_EVERY_MINUTES || 15);
 const DRY_RUN = process.env.DRY_RUN === 'true';
+
+// Dashboard settings (pause, interval) survive restarts.
+const DATA_DIR = fileURLToPath(new URL('../data', import.meta.url));
+const SETTINGS_FILE = `${DATA_DIR}/settings.json`;
+const settings = { everyMinutes: Number(process.env.RUN_EVERY_MINUTES || 15), paused: false };
+try { Object.assign(settings, JSON.parse(readFileSync(SETTINGS_FILE, 'utf8'))); } catch { /* first start */ }
+const saveSettings = () => { mkdirSync(DATA_DIR, { recursive: true }); writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2)); };
 
 // Dashboard login (browser pop-up). Cron services can call /api/run?key=RUN_KEY instead.
 app.use((req, res, next) => {
@@ -42,13 +50,43 @@ async function run(trigger) {
     return state.lastRun;
   } finally {
     state.running = false;
-    state.nextRun = new Date(Date.now() + EVERY_MIN * 60000);
   }
 }
 
+// Scheduled runs; paused = no automatic checks (Run now still works).
+let timer = null;
+function schedule() {
+  clearInterval(timer);
+  state.nextRun = settings.paused ? null : new Date(Date.now() + settings.everyMinutes * 60000);
+  if (settings.paused) return;
+  timer = setInterval(() => {
+    state.nextRun = new Date(Date.now() + settings.everyMinutes * 60000);
+    run('schedule');
+  }, settings.everyMinutes * 60000);
+}
+
 app.get('/health', (_, res) => res.send('ok'));
-app.get('/api/state', (_, res) => res.json({ ...state, config: { everyMinutes: EVERY_MIN, dryRun: DRY_RUN, pickUp: STATUS.pickUp, approve: STATUS.approve, reject: STATUS.reject || '(keep status)' } }));
+app.get('/api/state', (_, res) => res.json({ ...state, config: { ...settings, dryRun: DRY_RUN, pickUp: STATUS.pickUp, approve: STATUS.approve, reject: STATUS.reject || '(keep status)' } }));
 app.all('/api/run', async (req, res) => res.json(await run(req.query.key ? 'cron' : 'manual')));
+app.post('/api/settings', (req, res) => {
+  const { paused, everyMinutes } = req.body || {};
+  if (typeof paused === 'boolean') settings.paused = paused;
+  if (everyMinutes !== undefined) {
+    const m = Math.round(Number(everyMinutes));
+    if (!(m >= 1 && m <= 1440)) return res.status(400).json({ error: 'Minutes must be between 1 and 1440' });
+    settings.everyMinutes = m;
+  }
+  saveSettings();
+  schedule();
+  res.json(settings);
+});
+app.post('/api/clear', (_, res) => {
+  state.lastResults = [];
+  state.log = [];
+  state.lastRun = null;
+  rmSync(FIX_DIR, { recursive: true, force: true });
+  res.json({ cleared: true });
+});
 app.get('/api/check/:id', async (req, res) => {
   try { res.json(await checkSubTask(await getSubTask(req.params.id))); }
   catch (e) { res.status(500).json({ error: e.message }); }
@@ -65,7 +103,7 @@ app.use('/fixes', express.static(FIX_DIR));
 app.use(express.static(fileURLToPath(new URL('../public', import.meta.url))));
 
 app.listen(PORT, () => {
-  console.log(`SEO agent dashboard on http://localhost:${PORT} (runs every ${EVERY_MIN} min${DRY_RUN ? ', DRY RUN' : ''})`);
-  run('startup');
-  setInterval(() => run('schedule'), EVERY_MIN * 60000);
+  console.log(`SEO agent dashboard on http://localhost:${PORT} (${settings.paused ? 'PAUSED' : `runs every ${settings.everyMinutes} min`}${DRY_RUN ? ', DRY RUN' : ''})`);
+  if (!settings.paused) run('startup');
+  schedule();
 });
