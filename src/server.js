@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { runAgent, checkSubTask, fixSubTask, submitSubTask } from './agent.js';
 import { FIX_DIR } from './fixer.js';
-import { getSubTask, countSubTasks, STATUS } from './cms.js';
+import { getSubTask, countSubTasks, countApprovedSince, STATUS } from './cms.js';
+import { todayIST } from './checks.js';
 
 const app = express();
 app.use(express.json());
@@ -68,11 +69,15 @@ function schedule() {
 
 app.get('/health', (_, res) => res.send('ok'));
 app.get('/api/state', (_, res) => res.json({ ...state, config: { ...settings, dryRun: DRY_RUN, pickUp: STATUS.pickUp, approve: STATUS.approve, reject: STATUS.reject || '(keep status)' } }));
-// SEO queue sizes for the dashboard side panel (cached a minute; the page polls every 15 s).
+// SEO queue sizes and today's approvals for the dashboard side panel (cached a minute; the page polls every 15 s).
 let counts = { at: 0, data: null };
 app.get('/api/counts', async (_, res) => {
   try {
-    if (Date.now() - counts.at > 60000) counts = { at: Date.now(), data: await countSubTasks() };
+    if (Date.now() - counts.at > 60000) {
+      const since = new Date(`${todayIST()}T00:00:00+05:30`).toISOString();
+      const [queue, approvedToday] = await Promise.all([countSubTasks(), countApprovedSince(since)]);
+      counts = { at: Date.now(), data: { ...queue, approvedToday, since } };
+    }
     res.json({ ...counts.data, at: new Date(counts.at), cmsUrl: process.env.CMS_URL });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

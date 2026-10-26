@@ -77,6 +77,16 @@ export async function countSubTasks(statuses = ['readyForSEOReview', 'inSEORevie
   return out;
 }
 
+/** Subtasks approved since a time (approved, or already published = completed), per content type. */
+export async function countApprovedSince(since) {
+  const out = {};
+  await Promise.all(Object.keys(TYPES).map(async (type) => {
+    const j = await api(`/subTasks?${qs({ 'where[status][in]': 'approved,completed', 'where[contentCategory][equals]': type, 'where[updatedAt][greater_than_equal]': since, limit: 1, depth: 0 })}`);
+    out[type] = j.totalDocs;
+  }));
+  return out;
+}
+
 /** Latest saved draft for a subtask. */
 export async function getDraft(subTask) {
   const type = TYPES[subTask.contentCategory];

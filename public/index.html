@@ -77,6 +77,8 @@
       <h2>SEO queue in CMS</h2>
       <div class="muted" id="queueAt" style="font-size:13px">Loading…</div>
       <table><thead><tr><th>Type</th><th class="n">Ready for SEO review</th><th class="n">In SEO review</th></tr></thead><tbody id="queue"></tbody></table>
+      <h2 style="margin-top:18px">Approved today</h2>
+      <table><thead><tr><th>Type</th><th class="n">Approved</th></tr></thead><tbody id="approvedToday"></tbody></table>
     </aside>
   </div>
 </main>
@@ -128,7 +130,9 @@ async function loadQueue() {
   const q = await r.json();
   if (!r.ok) { $('queueAt').textContent = q.error; return; }
   const link = (status, type, n) => {
-    const where = `where[status][equals]=${status}` + (type ? `&where[contentCategory][equals]=${type}` : '');
+    const where = (status === 'approvedToday'
+      ? `where[status][in]=approved,completed&where[updatedAt][greater_than_equal]=${encodeURIComponent(q.since)}`
+      : `where[status][equals]=${status}`) + (type ? `&where[contentCategory][equals]=${type}` : '');
     return q.cmsUrl ? `<a href="${esc(q.cmsUrl)}/admin/collections/subTasks?${where}" target="_blank" rel="noopener">${n}</a>` : n;
   };
   const sum = (status) => TYPES.reduce((s, [k]) => s + (q[status]?.[k] || 0), 0);
@@ -136,6 +140,8 @@ async function loadQueue() {
     <td class="n"><b>${link('readyForSEOReview', k, q.readyForSEOReview?.[k] ?? 0)}</b></td>
     <td class="n"><b>${link('inSEOReview', k, q.inSEOReview?.[k] ?? 0)}</b></td></tr>`).join('')
     + `<tr class="total"><td>Total</td><td class="n">${link('readyForSEOReview', '', sum('readyForSEOReview'))}</td><td class="n">${link('inSEOReview', '', sum('inSEOReview'))}</td></tr>`;
+  $('approvedToday').innerHTML = TYPES.map(([k, label]) => `<tr><td>${label}</td><td class="n"><b>${link('approvedToday', k, q.approvedToday?.[k] ?? 0)}</b></td></tr>`).join('')
+    + `<tr class="total"><td>Total</td><td class="n">${link('approvedToday', '', sum('approvedToday'))}</td></tr>`;
   $('queueAt').textContent = `Updated ${new Date(q.at).toLocaleTimeString()} · click a number to open the list in the CMS`;
 }
 
