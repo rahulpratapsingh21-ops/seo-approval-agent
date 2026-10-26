@@ -80,8 +80,8 @@ export async function countSubTasks(statuses = ['readyForSEOReview', 'inSEORevie
 /**
  * Subtasks approved since a time (approved, or already published = completed): per content type,
  * and per silo for colleges/exams/courses. Pages for one course inside a college ("MBBS:courseDetails")
- * or one specialisation inside a course ("General:specialisation") are not silos: counted under `pages`.
- * Returns { types: { colleges: 8, … }, silos: { colleges: { overview: 5, … } }, pages: { colleges: 1 } }.
+ * or one specialisation inside a course ("General:specialisation") are not silos: counted under `pages`, per kind.
+ * Returns { types: { colleges: 8, … }, silos: { colleges: { overview: 5, … } }, pages: { colleges: { courseDetails: 1 } } }.
  */
 export async function countApprovedSince(since, until = null) {
   // Explicit "and": two operators on the same field (updatedAt ≥ since and < until) are not combined otherwise.
@@ -91,7 +91,11 @@ export async function countApprovedSince(since, until = null) {
   const silos = {}, pages = {};
   for (const st of j.docs) {
     const type = st.contentCategory;
-    if (String(st.page || '').includes(':')) { pages[type] = (pages[type] || 0) + 1; continue; }
+    if (String(st.page || '').includes(':')) {
+      const kind = st.page.split(':').pop(); // courseDetails, courseSpecialisation, specialisation
+      (pages[type] ??= {})[kind] = (pages[type]?.[kind] || 0) + 1;
+      continue;
+    }
     types[type]++;
     if (type !== 'blogs') (silos[type] ??= {})[st.page || 'other'] = (silos[type]?.[st.page || 'other'] || 0) + 1;
   }

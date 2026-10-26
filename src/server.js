@@ -34,7 +34,10 @@ function submittedIn({ since, until }) {
   const list = submits.filter((s) => s.at >= since && s.at < until);
   return {
     types: countBy(list.filter((s) => !s.page), (s) => s.type),
-    pages: countBy(list.filter((s) => s.page), (s) => s.type),
+    pages: list.filter((s) => s.page).reduce((m, s) => {
+      const kind = s.page.split(':').pop();
+      return { ...m, [s.type]: { ...m[s.type], [kind]: (m[s.type]?.[kind] || 0) + 1 } };
+    }, {}),
     silos: list.filter((s) => s.silo).reduce((m, s) => ({ ...m, [s.type]: { ...m[s.type], [s.silo]: (m[s.type]?.[s.silo] || 0) + 1 } }), {}),
   };
 }
