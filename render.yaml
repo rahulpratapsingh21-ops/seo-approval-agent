@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: seo-approval-agent
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: CMS_URL
+        value: https://cms.selectyouruniversity.com
+      - key: CMS_EMAIL
+        sync: false
+      - key: CMS_PASSWORD
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SAVE_FIXES
+        value: "false"
+      - key: RUN_KEY
+        generateValue: true
+      - key: RUN_EVERY_MINUTES
+        value: "15"
+      - key: DRY_RUN
+        value: "true"

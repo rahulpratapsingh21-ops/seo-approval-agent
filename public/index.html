@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SEO Approval Agent</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1b1f24; --muted:#667085; --line:#e4e7ec; --pass:#12805c; --pass-bg:#e7f6ef; --warn:#a15c00; --warn-bg:#fff4e0; --fail:#c0352b; --fail-bg:#fdecea; --accent:#d6246e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#121417; --card:#1b1e23; --text:#e8eaed; --muted:#98a2b3; --line:#2c3138; --pass:#4cc38a; --pass-bg:#16301f; --warn:#f0b54a; --warn-bg:#352a12; --fail:#f2766b; --fail-bg:#3a1c1a; --accent:#f05a9a; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:1000px; margin:0 auto; padding:20px 16px 60px; }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  h1 { font-size:22px; margin:0; } h2 { font-size:16px; margin:24px 0 10px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 18px; font-size:15px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .stat b { display:block; font-size:22px; } .stat span { color:var(--muted); font-size:13px; }
+  .item { background:var(--card); border:1px solid var(--line); border-radius:10px; margin-bottom:8px; }
+  .item summary { list-style:none; cursor:pointer; padding:12px 14px; display:flex; gap:10px; align-items:center; }
+  .item summary::-webkit-details-marker { display:none; }
+  .title { flex:1; min-width:0; } .title small { display:block; color:var(--muted); }
+  .pill { font-size:12px; font-weight:700; padding:3px 9px; border-radius:99px; white-space:nowrap; }
+  .pass { color:var(--pass); background:var(--pass-bg); } .warn { color:var(--warn); background:var(--warn-bg); } .fail { color:var(--fail); background:var(--fail-bg); }
+  .checks { border-top:1px solid var(--line); padding:8px 14px 12px; }
+  .check { display:flex; gap:8px; padding:4px 0; font-size:14px; } .check .pill { min-width:44px; text-align:center; }
+  .muted { color:var(--muted); } .empty { padding:18px; text-align:center; color:var(--muted); background:var(--card); border:1px dashed var(--line); border-radius:10px; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; font-size:14px; }
+  td, th { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); } th { color:var(--muted); font-weight:600; font-size:13px; }
+  .scroll { overflow-x:auto; }
+  button.small { padding:5px 12px; font-size:13px; margin-left:auto; }
+  .fix { border-top:1px solid var(--line); padding:12px 14px; background:color-mix(in srgb, var(--accent) 4%, var(--card)); }
+  .fix-head { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:6px; }
+  .fix ul { margin:6px 0 10px; padding-left:20px; font-size:14px; }
+  .fix .img { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:10px 0; }
+  .fix .img img { width:320px; max-width:100%; border-radius:8px; border:1px solid var(--line); }
+  .copy > div { display:flex; gap:8px; align-items:center; padding:5px 0; border-top:1px solid var(--line); font-size:14px; }
+  .copy span { width:130px; flex:none; color:var(--muted); } .copy code { flex:1; min-width:0; overflow-wrap:anywhere; }
+  .fail-text { color:var(--fail); margin:6px 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>SEO Approval Agent</h1><div class="muted" id="cfg"></div></div>
+    <button id="run">Run now</button>
+  </header>
+  <div class="stats" id="stats"></div>
+  <h2>Last run — articles checked</h2>
+  <div id="items"></div>
+  <h2>Activity log</h2>
+  <div class="scroll"><table><thead><tr><th>Time</th><th>Task</th><th>Article</th><th>Action</th><th>Score</th></tr></thead><tbody id="log"></tbody></table></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+const t = (d) => d ? new Date(d).toLocaleString() : '—';
+const actionPill = (a) => `<span class="pill ${a === 'approved' ? 'pass' : a === 'error' ? 'fail' : 'warn'}">${esc(a)}</span>`;
+
+async function load() {
+  const s = await (await fetch('api/state')).json();
+  const c = s.config;
+  $('cfg').textContent = `Checks "${c.pickUp.join(', ')}" every ${c.everyMinutes} min → pass: ${c.approve}, fail: ${c.reject}${c.dryRun ? ' · DRY RUN (no CMS changes)' : ''}`;
+  const r = s.lastResults || [];
+  $('stats').innerHTML = [
+    ['Status', s.running ? 'Running…' : 'Idle'],
+    ['Last run', t(s.lastRun?.at)],
+    ['Next run', t(s.nextRun)],
+    ['Checked', r.length],
+    ['Approved', r.filter((x) => x.action === 'approved').length],
+    ['Need fixes', r.filter((x) => x.result?.status === 'fail').length],
+  ].map(([k, v]) => `<div class="stat"><span>${k}</span><b>${esc(v)}</b></div>`).join('');
+  if (s.lastRun?.error) $('stats').innerHTML += `<div class="stat fail"><span>Error</span>${esc(s.lastRun.error)}</div>`;
+
+  $('items').innerHTML = r.length ? r.map((x) => {
+    const res = x.result || { checks: [] };
+    const cls = x.action === 'error' ? 'fail' : res.status;
+    return `<details class="item" data-id="${x.id}"><summary>
+      <span class="pill ${cls}">${x.action === 'error' ? 'ERROR' : res.status.toUpperCase()}</span>
+      <span class="title">${esc(x.title)}<small>${esc(x.type || '')}${x.tab ? ' › ' + esc(x.tab) : ''} · Task #${esc(x.subTaskId)} · /${esc(x.pageUrl || '')} · CTA ${res.ctaCount ?? '—'} · ${res.words ?? '—'} words</small></span>
+      <span class="muted">${res.score ?? ''}</span>${actionPill(x.action)}
+    </summary><div class="checks">${x.error ? esc(x.error) : res.checks.map((k) =>
+      `<div class="check"><span class="pill ${k.level}">${k.level}</span><span><b>${esc(k.label)}</b> — ${esc(k.detail)}</span></div>`).join('')}</div>${fixPanel(x)}</details>`;
+  }).join('') : '<div class="empty">No subtasks waiting for SEO review right now.</div>';
+
+  $('log').innerHTML = s.log.length ? s.log.map((l) => `<tr><td>${t(l.at)}</td><td>#${esc(l.subTaskId)}</td><td>${esc(l.title)}</td><td>${actionPill(l.action)}${l.error ? ' ' + esc(l.error) : ''}</td><td>${l.score ?? ''}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="muted">No actions yet.</td></tr>';
+  $('run').disabled = s.running;
+}
+
+const copies = {};
+function fixPanel(x) {
+  if (x.type !== 'blogs' || x.result?.status !== 'fail') return '';
+  const f = x.fix;
+  const again = `<button class="small" onclick="fixNow('${x.id}', this)">${f ? 'Fix again' : 'Fix with AI'}</button>`;
+  if (!f) return `<div class="fix">${again}</div>`;
+  if (f.error) return `<div class="fix"><b>Auto-fix</b><div class="fail-text">${esc(f.error)}</div>${again}</div>`;
+  const fields = [['H1', 'title'], ['Meta title', 'metaTitle'], ['Meta description', 'metaDescription'], ['URL', 'pageUrl'], ['Article HTML', 'html']];
+  return `<div class="fix">
+    <div class="fix-head"><b>Auto-fix</b><span>Score ${f.before.score} → <b>${f.after.score}</b></span>
+      <span class="pill ${f.after.status}">${f.after.status === 'pass' ? 'PASSES AFTER FIX' : 'STILL NEEDS WORK'}</span>
+      <span class="muted">${f.saved ? 'Saved to CMS' : 'Not saved — copy into CMS'}</span>${again}</div>
+    <ul>${f.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>
+    ${f.imageFile ? `<div class="img"><img src="fixes/${esc(f.imageFile)}" alt="${esc(f.imageAlt)}"><div><a href="fixes/${esc(f.imageFile)}" download>Download feature image</a><br><span class="muted">Alt: ${esc(f.imageAlt)}</span></div></div>` : ''}
+    <div class="copy">${fields.filter(([, k]) => f.fields[k]).map(([label, k]) => {
+      const id = `${x.id}-${k}`; copies[id] = f.fields[k];
+      return `<div><span>${label}</span>${k === 'html' ? `<code class="muted">${f.fields.html.length.toLocaleString()} characters</code>` : `<code>${esc(f.fields[k])}</code>`}<button class="small" onclick="copyText('${id}', this)">Copy</button></div>`;
+    }).join('')}</div>
+  </div>`;
+}
+async function copyText(id, btn) { await navigator.clipboard.writeText(copies[id]); btn.textContent = 'Copied'; setTimeout(() => (btn.textContent = 'Copy'), 1500); }
+async function fixNow(id, btn) {
+  btn.disabled = true; btn.textContent = 'Fixing… (about 1 min)';
+  const open = [...document.querySelectorAll('details[open]')].map((d) => d.dataset.id);
+  await fetch('api/fix/' + id, { method: 'POST' }); await load();
+  open.forEach((o) => document.querySelector(`details[data-id="${o}"]`)?.setAttribute('open', ''));
+}
+
+$('run').onclick =async () => { $('run').disabled = true; $('run').textContent = 'Running…'; await fetch('api/run', { method: 'POST' }); $('run').textContent = 'Run now'; load(); };
+load(); setInterval(() => { if (!document.querySelector('details[open]')) load(); }, 15000);
+</script>
+</body>
+</html>
