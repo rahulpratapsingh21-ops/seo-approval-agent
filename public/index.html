@@ -21,6 +21,7 @@
   .queue h2 { margin:0 0 4px; } .queue table { border:0; } .queue td, .queue th { padding:7px 6px; }
   .queue td.n, .queue th.n { text-align:right; font-variant-numeric:tabular-nums; } .queue td.n b { font-size:17px; }
   .queue tr.total td { border-bottom:0; font-weight:700; }
+  .queue tr.item td { font-size:13px; }
   .queue tr.silo td { font-size:13px; color:var(--muted); padding-top:4px; padding-bottom:4px; } .queue tr.silo td:first-child { padding-left:18px; } .queue a { color:inherit; text-decoration:none; } .queue a:hover { color:var(--accent); }
   @media (max-width:900px) { .layout { grid-template-columns:1fr; } .queue { position:static; order:-1; } }
   header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:16px; }
@@ -142,6 +143,7 @@ async function load() {
 
 // Right panel: how many subtasks wait in each SEO status, per type; each number opens that list in the CMS.
 const TYPES = [['blogs', 'Blogs'], ['colleges', 'Colleges'], ['exams', 'Exams'], ['courses', 'Courses']];
+const PAGE_LABEL = { colleges: 'College course pages', courses: 'Course specialisation pages' };
 async function loadQueue() {
   const r = await fetch('api/counts');
   const q = await r.json();
@@ -164,8 +166,11 @@ async function loadQueue() {
   $('approvedToday').innerHTML = TYPES.map(([k, label]) => `<tr><td>${label}</td><td class="n"><b>${link('approvedToday', k, q.approvedToday?.[k] ?? 0)}</b></td>
     <td class="n"><b>${q.submittedToday?.[k] ?? 0}</b></td></tr>`
     + Object.entries(q.approvedSilos?.[k] || {}).sort((a, b) => b[1] - a[1]).map(([silo, n]) => `<tr class="silo"><td>${esc(siloName(silo))}</td>
-      <td class="n">${link('approvedToday', k, n, silo)}</td><td class="n">${q.submittedSilos?.[k]?.[silo] ?? 0}</td></tr>`).join('')).join('')
-    + `<tr class="total"><td>Total</td><td class="n">${link('approvedToday', '', sum('approvedToday'))}</td><td class="n">${sum('submittedToday')}</td></tr>`;
+      <td class="n">${link('approvedToday', k, n, silo)}</td><td class="n">${q.submittedSilos?.[k]?.[silo] ?? 0}</td></tr>`).join('')
+    // Pages for one course inside a college / one specialisation inside a course: not silos, shown apart.
+    + (q.approvedPages?.[k] ? `<tr class="item"><td>${PAGE_LABEL[k] || `${label} item pages`} <span class="muted">(not silos)</span></td>
+      <td class="n"><b>${q.approvedPages[k]}</b></td><td class="n"><b>${q.submittedPages?.[k] ?? 0}</b></td></tr>` : '')).join('')
+    + `<tr class="total"><td>Total</td><td class="n">${link('approvedToday', '', sum('approvedToday') + sum('approvedPages'))}</td><td class="n">${sum('submittedToday') + sum('submittedPages')}</td></tr>`;
   $('queueAt').textContent = `Updated ${new Date(q.at).toLocaleTimeString()} · click a number to open the list in the CMS`;
 }
 

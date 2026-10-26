@@ -28,9 +28,10 @@ const recordSubmit = (entry) => {
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileSync(SUBMITS_FILE, JSON.stringify(submits));
 };
-const submittedSince = (since) => submits.filter((s) => s.at >= since)
-  .reduce((m, s) => ({ ...m, [s.type]: (m[s.type] || 0) + 1 }), {});
-// Same, per silo: { colleges: { overview: 1 } }.
+// Per type (silos only), per silo, and per-course/specialisation pages — same split as the CMS counts.
+const countBy = (list, key) => list.reduce((m, s) => ({ ...m, [key(s)]: (m[key(s)] || 0) + 1 }), {});
+const submittedSince = (since) => countBy(submits.filter((s) => s.at >= since && !s.page), (s) => s.type);
+const submittedPagesSince = (since) => countBy(submits.filter((s) => s.at >= since && s.page), (s) => s.type);
 const submittedSilosSince = (since) => submits.filter((s) => s.at >= since && s.silo)
   .reduce((m, s) => ({ ...m, [s.type]: { ...m[s.type], [s.silo]: (m[s.type]?.[s.silo] || 0) + 1 } }), {});
 
@@ -91,10 +92,11 @@ app.get('/api/counts', async (_, res) => {
     if (Date.now() - counts.at > 60000) {
       const since = new Date(`${todayIST()}T00:00:00+05:30`).toISOString();
       const [queue, approved] = await Promise.all([countSubTasks(), countApprovedSince(since)]);
-      counts = { at: Date.now(), data: { ...queue, approvedToday: approved.types, approvedSilos: approved.silos, since } };
+      counts = { at: Date.now(), data: { ...queue, approvedToday: approved.types, approvedSilos: approved.silos, approvedPages: approved.pages, since } };
     }
     // Submits are local, so always fresh (not cached).
-    res.json({ ...counts.data, submittedToday: submittedSince(counts.data.since), submittedSilos: submittedSilosSince(counts.data.since), at: new Date(counts.at), cmsUrl: process.env.CMS_URL });
+    res.json({ ...counts.data, submittedToday: submittedSince(counts.data.since), submittedSilos: submittedSilosSince(counts.data.since),
+      submittedPages: submittedPagesSince(counts.data.since), at: new Date(counts.at), cmsUrl: process.env.CMS_URL });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.all('/api/run', async (req, res) => res.json(await run(req.query.key ? 'cron' : 'manual')));
@@ -134,7 +136,9 @@ app.post('/api/submit/:id', async (req, res) => {
   try {
     const st = await getSubTask(req.params.id);
     const out = await submitSubTask(st);
-    recordSubmit({ at: new Date().toISOString(), subTaskId: out.subTaskId, type: st.contentCategory, silo: String(st.page || '').split(':').pop() });
+    const perItem = String(st.page || '').includes(':'); // one course/specialisation page, not a silo
+    recordSubmit({ at: new Date().toISOString(), subTaskId: out.subTaskId, type: st.contentCategory,
+      ...(perItem ? { page: st.page } : st.contentCategory !== 'blogs' && { silo: st.page }) });
     const r = state.lastResults.find((x) => x.id === req.params.id);
     if (r) r.action = 'fixed & approved';
     state.log.unshift({ at: new Date(), trigger: 'manual', subTaskId: out.subTaskId, title: r?.title, action: 'fixed & approved' });
