@@ -49,7 +49,9 @@ export async function userOptions() {
 async function matchUser(name, roleRe, fallbackEmail) {
   const all = (await users()).filter((u) => roleRe.test(u.role));
   const n = String(name || '').toLowerCase().split(/[\s.]+/)[0];
-  const hit = n && (all.find((u) => u.email.split('@')[0].toLowerCase() === n) || all.find((u) => u.email.toLowerCase().startsWith(n)));
+  const local = (u) => u.email.split('@')[0].toLowerCase();
+  // Exact, then prefix, then contained (e.g. "Shreshtha" → update_shreshtha@syu.com).
+  const hit = n && (all.find((u) => local(u) === n) || all.find((u) => local(u).startsWith(n)) || all.find((u) => local(u).split(/[._-]/).includes(n)));
   return hit || all.find((u) => u.email === fallbackEmail) || null;
 }
 
@@ -119,6 +121,8 @@ async function inspectLiveUrl(liveUrl) {
       pageId: sub.id, pageHierarchy: { currentId: sub.id, parentId: ent.id }, selected: u.pathname === path });
   }
   if (!silos.some((s) => s.selected)) silos[0].selected = true;
+  // Update tasks cover only the silo of the given URL (main URL = Overview).
+  silos.splice(0, silos.length, ...silos.filter((s) => s.selected));
   await Promise.all(silos.map(async (s) => {
     const m = s.liveUrl === `${SITE}${u.pathname}` ? meta : await pageMeta(s.liveUrl);
     Object.assign(s, { metaTitle: m.title || '', metaDescription: m.description || '' });
@@ -203,7 +207,8 @@ export async function createFromItem(item) {
 
   const created = [];
   for (const s of silos) {
-    const title = item.category === 'blogs' || s.page === 'overview' ? item.topic : `${item.topic} ${s.label}`;
+    // Update rows already name the silo in the topic; new rows need the silo added to tell subtasks apart.
+    const title = item.mode === 'update' || item.category === 'blogs' || s.page === 'overview' ? item.topic : `${item.topic} ${s.label}`;
     try {
       const st = await cmsCreate('subTasks', {
         title, description: item.topic, parentTaskId: task.id, contentCategory: item.category,

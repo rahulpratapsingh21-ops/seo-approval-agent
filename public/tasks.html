@@ -47,7 +47,7 @@
       <button id="preview">Preview</button>
       <span class="muted" id="status"></span>
     </div>
-    <div class="muted" style="margin-top:8px;font-size:13px">Row with <b>Live URL</b> → update task (silos and meta read from the live page). No Live URL → new task. Rows that already have a Task ID are skipped. Nothing is created until you click <b>Create</b>.</div>
+    <div class="muted" style="margin-top:8px;font-size:13px">Row with <b>Live URL</b> → update task for that URL's silo only (meta copied from the live page). No Live URL → new task. Rows that already have a Task ID are skipped. Nothing is created until you click <b>Create</b>.</div>
   </div>
 
   <div id="items"></div>
@@ -112,7 +112,7 @@ function render() {
 
     const silos = `<div class="scroll"><table><thead><tr><th></th><th>Silo / subtask</th><th>Page URL</th><th>Meta title</th><th>Meta description</th></tr></thead><tbody>
       ${(it.silos || []).map((s, k) => `<tr class="${s.selected ? '' : 'silo-off'}">
-        <td><input type="checkbox" ${s.selected ? 'checked' : ''} ${it.category === 'blogs' ? 'disabled' : ''} onchange="items[${i}].silos[${k}].selected=this.checked; render()"></td>
+        <td><input type="checkbox" ${s.selected ? 'checked' : ''} ${it.category === 'blogs' || it.mode === 'update' ? 'disabled' : ''} onchange="items[${i}].silos[${k}].selected=this.checked; render()"></td>
         <td>${esc(s.label)}${s.liveUrl ? `<br><a class="muted" href="${esc(s.liveUrl)}" target="_blank">live</a>` : ''}</td>
         <td><input type="text" value="${esc(s.pageUrl)}" onchange="items[${i}].silos[${k}].pageUrl=this.value"></td>
         <td><textarea onchange="items[${i}].silos[${k}].metaTitle=this.value">${esc(s.metaTitle)}</textarea></td>
