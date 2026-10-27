@@ -149,7 +149,7 @@ export function renderSceneImage({ line1, line2 = '', year = '' }, { scene, logo
     <text x="980" y="96" font-family="Poppins" font-weight="700" font-size="16" fill="${PINK}">YOUR UNIVERSITY</text>
   </g>
   ${logo ? `<g filter="url(#shadow)"><circle cx="1040" cy="300" r="118" fill="#ffffff"/></g>
-  <image href="${logo}" x="940" y="200" width="200" height="200" preserveAspectRatio="xMidYMid meet" clip-path="url(#logoClip)"/>` : ''}
+  <image href="${logo}" x="965" y="225" width="150" height="150" preserveAspectRatio="xMidYMid meet" clip-path="url(#logoClip)"/>` : ''}
   <g transform="rotate(-3 ${cx} 330)">${strokes}</g>
 </svg>`;
   return new Resvg(svg, { font: { fontFiles: FONTS, loadSystemFonts: false, defaultFontFamily: 'Poppins' }, fitTo: { mode: 'width', value: W } }).render().asPng();

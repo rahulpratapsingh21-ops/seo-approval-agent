@@ -496,21 +496,26 @@ ${plainText($)}`,
   }
   if (!(draft.authorName || '').trim() && writer) setField('authorName', 'Writer', writer);
 
-  // 7. New feature image (uploaded and set as hero image on Submit).
-  //    With an image-AI key: an AI photo scene with the title, year, logo and brand drawn on top.
-  //    Without one (or if the AI fails): the drawn design. The logo (and campus photo) come from the CMS.
+  // 7. New feature image (uploaded and set as hero image on Submit), in the sample layout
+  //    (stacked brush-stroke title, logo on the right, SYU brand) on the best photo available:
+  //    an AI photo (with an image-AI key) → the college/exam campus photo from the CMS →
+  //    only when there is no photo at all, the drawn desk design.
   const pics = await getEntityImages(draft, `${primary} ${draft.title}`).catch(() => ({}));
   const logo = await imageDataUri(pics.logo, { format: 'png', width: 300 });
-  let png = null, how = 'drawn design';
+  let png = null, how = '';
   if (imageAiReady()) {
     try {
       png = renderSceneImage(plan.featureImage, { scene: await generateScene(plan.featureImage.scene), logo });
       how = 'AI photo background';
     } catch (e) {
-      how = `drawn design — AI photo failed: ${e.message.slice(0, 120)}`;
+      how = ` (AI photo failed: ${e.message.slice(0, 120)})`;
     }
   }
-  png ??= renderFeatureImage(plan.featureImage, { logo, photo: await imageDataUri(pics.cover, { format: 'jpg', width: 1200 }) });
+  if (!png) {
+    const campus = await imageDataUri(pics.cover, { format: 'jpg', width: 1200 });
+    if (campus) { png = renderSceneImage(plan.featureImage, { scene: campus, logo }); how = `campus photo${how}`; }
+    else { png = renderFeatureImage(plan.featureImage, { logo }); how = `drawn design${how}`; }
+  }
   mkdirSync(FIX_DIR, { recursive: true });
   const imageFile = `${st.subTaskId}-feature.png`;
   writeFileSync(`${FIX_DIR}/${imageFile}`, png);
