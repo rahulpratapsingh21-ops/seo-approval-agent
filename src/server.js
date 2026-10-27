@@ -83,7 +83,8 @@ async function run(trigger) {
     for (const r of results) {
       if (r.auto) recordSubmit(submitEntry(r.subTaskId, r.type, r.tab, true));
       // Log each task once per new outcome, not on every scheduled run.
-      if (state.log.find((l) => l.subTaskId === r.subTaskId)?.action !== r.action) state.log.unshift({ at: started, trigger, subTaskId: r.subTaskId, title: r.title, action: r.action, score: r.result?.score, error: r.error });
+      if (state.log.find((l) => l.subTaskId === r.subTaskId)?.action !== r.action) state.log.unshift({ at: started, trigger, subTaskId: r.subTaskId, title: r.title, action: r.action,
+        score: r.fix?.after && r.action !== 'needs fix' ? `${r.result?.score} → ${r.fix.after.score}` : r.result?.score, error: r.error });
     }
     state.log = state.log.slice(0, 300);
     state.lastRun = { at: started, trigger, count: results.length, readyToSubmit: results.filter((r) => r.action === 'ready to submit').length, autoApproved: results.filter((r) => r.auto).length };
