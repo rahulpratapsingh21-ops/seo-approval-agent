@@ -131,6 +131,26 @@ function linkBareCtas($, ctaText, primary, title, changes) {
  * text above it. Some articles open with a short "Latest Updates" H2 before the intro, so the very
  * first H2 can sit above all the text. null when the article has no such H2.
  */
+// A line that is only a link ("👉 Click here to check CSJMU Result Direct Link"), even when styled as a
+// heading: it belongs to the text above it, so it is never a section boundary and CTAs go after it.
+function isLinkLine($, el) {
+  if (!/^(p|h2|h3|h4)$/.test(el.tagName) || isCtaBox($, el)) return false;
+  const a = $(el).find('a');
+  if (a.length !== 1) return false;
+  const t = $(el).text().replace(/[👉\s]+/gu, ' ').trim();
+  return !!t && t === a.text().replace(/\s+/g, ' ').trim();
+}
+const isSection = ($, el) => el.tagName === 'h2' && !isCtaBox($, el) && !isLinkLine($, el);
+
+// CTAs need at least this much article text between them.
+const CTA_GAP_WORDS = 150;
+const wordsOf = ($, el) => (isCtaBox($, el) ? 0 : $(el).text().split(/\s+/).filter(Boolean).length);
+function wordsBetween($, a, b) {
+  const top = $.root().children().toArray();
+  const [i, j] = [top.indexOf(a), top.indexOf(b)].sort((x, y) => x - y);
+  return top.slice(i + 1, j).reduce((n, el) => n + wordsOf($, el), 0);
+}
+
 const INTRO_WORDS = 60;
 // True when at least INTRO_WORDS of article text come before this element.
 const hasTextBefore = ($, el) => $(el).prevAll().toArray().filter((x) => !isCtaBox($, x))
@@ -138,8 +158,8 @@ const hasTextBefore = ($, el) => $(el).prevAll().toArray().filter((x) => !isCtaB
 function introBoundary($) {
   let words = 0;
   for (const el of $.root().children().toArray()) {
-    if (el.tagName === 'h2' && !isCtaBox($, el) && words >= INTRO_WORDS) return el;
-    if (!isCtaBox($, el)) words += $(el).text().split(/\s+/).filter(Boolean).length;
+    if (isSection($, el) && words >= INTRO_WORDS) return el;
+    words += wordsOf($, el);
   }
   return null;
 }
@@ -159,43 +179,57 @@ function introSpot($) {
 }
 
 /**
- * Misplaced CTAs move to the right spot: above the intro (before any real text) → after the intro;
- * right under a heading (before its text) → just before that heading; inside the FAQs → before the FAQs.
+ * Misplaced CTAs move to the right spot:
+ * - right before a link line ("👉 Click here … Direct Link") → after it;
+ * - above the intro (before any real text) → after the intro;
+ * - right under a heading (before its text) → just before that heading;
+ * - inside the FAQs → before the FAQs.
+ * Then CTAs with less than CTA_GAP_WORDS of text between them are thinned out (the first one stays).
  */
 function moveMisplacedCtas($, changes) {
   const top = () => $.root().children().toArray();
-  const faq = top().find((el) => el.tagName === 'h2' && /faq|frequently asked/i.test($(el).text()));
-  const intro = introBoundary($);
+  const faq = top().find((el) => isSection($, el) && /faq|frequently asked/i.test($(el).text()));
+  // Its own empty lines go with it; ctaGaps() adds fresh ones in the new place.
+  const lift = (box) => {
+    [$(box).prev().get(0), $(box).next().get(0)].filter((g) => isGap($, g)).forEach((g) => $(g).remove());
+    const html = $.html(box);
+    $(box).remove();
+    return html;
+  };
   for (const box of top().filter((el) => isCtaBox($, el))) {
-    const prev = prevContent($, box);
-    let target = null, why = '';
+    // Link lines right after the CTA: the CTA goes below the last of them.
+    let next = $(box).next().get(0), lastLink = null;
+    while (next && (isGap($, next) || isLinkLine($, next))) { if (isLinkLine($, next)) lastLink = next; next = $(next).next().get(0); }
+    if (lastLink) {
+      const html = lift(box);
+      $(lastLink).after(html);
+      changes.push(`Moved CTA after the link "${$(lastLink).text().replace(/\s+/g, ' ').trim().slice(0, 50)}"`);
+      continue;
+    }
+    const intro = introBoundary($);
     if (intro && top().indexOf(box) < top().indexOf(intro) && !hasTextBefore($, box)) {
-      // Take it out first, then find the spot after the intro text (it may have been in the way).
-      [$(box).prev().get(0), $(box).next().get(0)].filter((g) => isGap($, g)).forEach((g) => $(g).remove());
-      const html = $.html(box);
-      $(box).remove();
+      const html = lift(box); // out first: it may sit where the intro spot is measured
       $(introSpot($) || intro).before(html);
       changes.push('Moved CTA from above the intro to after it');
       continue;
     }
-    if (prev && /^h[2-4]$/.test(prev.tagName) && !isCtaBox($, prev)) { target = prev; why = `from under the heading "${$(prev).text().trim().slice(0, 50)}"`; }
-    else if (prev && /^h[2-4]$/.test(prev.tagName) && !isCtaBox($, prev)) { target = prev; why = `from under the heading "${$(prev).text().trim().slice(0, 50)}"`; }
+    const prev = prevContent($, box);
+    let target = null, why = '';
+    if (prev && /^h[2-4]$/.test(prev.tagName) && !isCtaBox($, prev) && !isLinkLine($, prev)) { target = prev; why = `from under the heading "${$(prev).text().trim().slice(0, 50)}"`; }
     else if (faq && top().indexOf(box) > top().indexOf(faq)) { target = faq; why = 'out of the FAQs'; }
     if (!target) continue;
-    // Its own empty lines go with it; ctaGaps() adds fresh ones in the new place.
-    [$(box).prev().get(0), $(box).next().get(0)].filter((g) => isGap($, g)).forEach((g) => $(g).remove());
-    const html = $.html(box);
-    $(box).remove();
+    const html = lift(box);
     $(target).before(html);
     changes.push(`Moved CTA ${why}`);
   }
-  // Two CTA boxes next to each other (only empty lines between): keep the first.
+  // Too close to the previous CTA (side by side, or only a short paragraph between): remove it.
+  let kept = null;
   for (const box of top().filter((el) => isCtaBox($, el))) {
-    const prev = prevContent($, box);
-    if (!prev || !isCtaBox($, prev)) continue;
-    [$(box).next().get(0)].filter((g) => isGap($, g)).forEach((g) => $(g).remove());
-    $(box).remove();
-    changes.push('Removed a CTA right next to another CTA');
+    if (kept && wordsBetween($, kept, box) < CTA_GAP_WORDS) {
+      [$(box).next().get(0)].filter((g) => isGap($, g)).forEach((g) => $(g).remove());
+      $(box).remove();
+      changes.push(`Removed a CTA too close to the one before (under ${CTA_GAP_WORDS} words apart)`);
+    } else kept = box;
   }
 }
 
@@ -206,8 +240,10 @@ function moveMisplacedCtas($, changes) {
  */
 function ctaSlots($) {
   const top = $.root().children().toArray();
-  const h2s = top.filter((el) => el.tagName === 'h2' && !isCtaBox($, el));
-  const near = (el) => { const p = prevContent($, el); return !!p && isCtaBox($, p); };
+  const h2s = top.filter((el) => isSection($, el));
+  // A spot is free when no CTA is closer than CTA_GAP_WORDS of text to it.
+  const ctas = top.filter((el) => isCtaBox($, el));
+  const near = (el) => ctas.some((c) => wordsBetween($, c, el) + (top.indexOf(c) > top.indexOf(el) ? wordsOf($, el) : 0) < CTA_GAP_WORDS);
   if (!h2s.length) {
     return [0.2, 0.55, 0.85].map((f) => top[Math.max(1, Math.floor(top.length * f))]).filter(Boolean)
       .map((el, i) => ({ name: ['after the intro', 'mid-article', 'near the end'][i], before: el, free: !near(el) }));
@@ -218,8 +254,9 @@ function ctaSlots($) {
   const middle = h2s.filter((h) => h !== intro && h !== faq && top.indexOf(h) > top.indexOf(intro))
     .sort((a, b) => Math.abs(top.indexOf(a) - top.length / 2) - Math.abs(top.indexOf(b) - top.length / 2))[0];
   const introHasCta = top.slice(0, top.indexOf(intro)).some((el) => isCtaBox($, el) && hasTextBefore($, el));
+  const spot = introSpot($) || intro;
   return [
-    { name: 'after the intro', before: introSpot($) || intro, free: !introHasCta },
+    { name: 'after the intro', before: spot, free: !introHasCta && !near(spot) },
     middle && { name: 'mid-article', before: middle, free: !near(middle) },
     { name: faq ? 'before the FAQs' : 'before the last section', before: faq || h2s[h2s.length - 1], free: !near(faq || h2s[h2s.length - 1]) },
   ].filter((s, i, all) => s && all.findIndex((x) => x && x.before === s.before) === i);
@@ -237,15 +274,20 @@ function ctaSlots($) {
 export function arrangeBlogCtas($, ctaText, { primary, title, isUpdate }, changes) {
   linkBareCtas($, ctaText, primary, title, changes);
   tidyCtas($, ctaText, primary, title, changes);
+  const countCtas = () => $.root().children().filter((_, el) => isCtaBox($, el)).length;
+  // The count is decided before moving/thinning, so a CTA removed for being too close is re-added in a better spot.
+  const original = Math.min(countCtas(), 3);
   moveMisplacedCtas($, changes);
-  const ctas = $.root().children().filter((_, el) => isCtaBox($, el)).toArray();
-  ctas.slice(3).forEach((c) => { $(c).remove(); changes.push('Removed extra CTA (max 3)'); });
+  $.root().children().filter((_, el) => isCtaBox($, el)).toArray().slice(3)
+    .forEach((c) => { $(c).remove(); changes.push('Removed extra CTA (max 3)'); });
   const words = $.root().text().replace(/\s+/g, ' ').trim().split(' ').length;
-  const have = Math.min(ctas.length, 3);
-  let target = isUpdate ? (have >= 1 ? have : 2) : Math.max(have, words > 1500 ? 3 : 2);
-  const slots = ctaSlots($);
-  if (slots[0]?.free && target === have && have < 3) target++;
-  for (const slot of slots.filter((s) => s.free).slice(0, Math.max(0, Math.min(target, 3) - have))) {
+  let target = isUpdate ? (original >= 1 ? original : 2) : Math.max(original, words > 1500 ? 3 : 2);
+  const first = ctaSlots($);
+  if (first[0]?.free && target === countCtas() && target < 3) target++;
+  // One at a time, so each new CTA keeps its distance from the ones already placed.
+  while (countCtas() < Math.min(target, 3)) {
+    const slot = ctaSlots($).find((s) => s.free);
+    if (!slot) break;
     $(slot.before).before(ctaBlock(ctaText));
     changes.push(`Added CTA ${slot.name}: "☎️ ${ctaText} ☎️"`);
   }
