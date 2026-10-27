@@ -45,7 +45,7 @@ export async function checkAll() {
 
 // One fix per saved draft version, so a draft is only sent to Claude again after the writer changes it.
 // FIX_VERSION goes up when the fix rules change, so older saved fixes are made again.
-const FIX_VERSION = 5;
+const FIX_VERSION = 6;
 const fixPath = (id) => `${FIX_DIR}/${id}.json`;
 export function getFix(subTaskId) {
   try { return JSON.parse(readFileSync(fixPath(subTaskId), 'utf8')); } catch { return null; }
@@ -98,13 +98,22 @@ export async function fixSubTask(st, { force = false } = {}) {
 
 /**
  * Every task gets its SEO update prepared (meta, image, links, CTAs — see fixer.js) from the current content.
- * It then waits for Submit on the dashboard, which saves it in the CMS and approves.
+ * With auto-approve on, an update that passes every check is saved in the CMS and approved right away;
+ * otherwise (or when it still fails a check) it waits for Submit on the dashboard.
  */
-export async function decide(st, { dryRun = false } = {}) {
+export async function decide(st, { dryRun = false, autoApprove = false } = {}) {
   const item = await checkSubTask(st);
   const fix = await fixSubTask(st);
-  const action = fix?.after?.status === 'pass' ? 'ready to submit' : 'needs fix';
-  return { ...item, fix, action, dryRun };
+  const ready = fix?.after?.status === 'pass';
+  if (ready && autoApprove && !dryRun && !fix.submittedAt) {
+    try {
+      await submitSubTask(st);
+      return { ...item, fix: getFix(st.subTaskId), action: 'fixed & approved', auto: true };
+    } catch (e) {
+      return { ...item, fix, action: 'ready to submit', autoError: `Auto-approve failed: ${e.message}` };
+    }
+  }
+  return { ...item, fix, action: ready ? 'ready to submit' : 'needs fix', dryRun };
 }
 
 /** Submit: upload the new feature image, save the prepared fields into the CMS draft and approve. */
@@ -130,11 +139,11 @@ export async function submitSubTask(st) {
 }
 
 /** One agent run: check every subtask waiting for SEO review and act on it. */
-export async function runAgent({ dryRun = false } = {}) {
+export async function runAgent({ dryRun = false, autoApprove = false } = {}) {
   const subs = await listSubTasks();
   const results = [];
   for (const st of subs) {
-    try { results.push(await decide(st, { dryRun })); }
+    try { results.push(await decide(st, { dryRun, autoApprove })); }
     catch (e) { results.push({ id: st.id, subTaskId: st.subTaskId, title: st.title, action: 'error', error: e.message }); }
   }
   return results;

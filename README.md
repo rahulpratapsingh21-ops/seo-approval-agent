@@ -15,9 +15,10 @@ A task is an **update** when its parent task has `updateData` set or its URL is 
 
 ## Blog process
 Never changes the article body text. The H1 is rewritten from the content in both cases (update and new).
-- **URL exists (update):** URL kept. Meta title and meta description rewritten from the current content, a new feature image, internal links on exact keywords, image alt text. CTAs: if there is one, none are added (off-topic CTA text is rewritten); if there are none, 2 are added.
+- **URL exists (update):** URL kept. Meta title and meta description rewritten from the current content, a new feature image, internal links on exact keywords, image alt text. CTAs: existing ones stay (off-topic text is rewritten); one is added after the intro if missing; if there are none, 2 are added.
 - **New URL:** URL created from the content, then meta title, meta description, feature image, CTAs (2, or 3 for long articles) and internal links on exact keywords.
-- Internal links: where another published blog's keyword appears word-for-word in the article (max 4, never on the article's own primary keyword).
+- Internal links, only when the article has fewer than 4: keyword phrases found word-for-word (another blog's keyword, or Claude's anchor copied from the text; never a website address or the article's own keyword). If that still leaves fewer than 3, "👉 Also Read: <related title>" lines go before later sections.
+- CTA placement: after the intro (every blog), before a middle section, before the FAQs — max 3. CTA lines without the lead-form link become CTA boxes; CTAs under a heading or inside the FAQs are moved; two CTAs side by side become one.
 - Also: competitor links removed, date set to today, a missing writer name filled.
 - Feature image (1200×675): campus photo of the college/exam (or a drawn study desk), its logo in a white circle, title on a navy brush stroke, topic + year on a yellow one, course books and a "Results"-style laptop, SYU brand top right. Only the text, logo, photo and book labels change per article.
 
@@ -25,10 +26,10 @@ Never changes the article body text. The H1 is rewritten from the content in bot
 Each silo (overview, admissions, results, …) is checked on its own. It is an **update** when the college/exam/course already has that silo published or live on the website (`/college|exam|course/<overview url>/<silo url>`) — the URL is kept. A **new** silo gets a URL built like published ones (overview: `<name>-cid|eid|mci-<number>`; other silos: the URL other entities use, e.g. `results`).
 The fix rewrites the H1 (page display title), meta title and meta description from the current content and sets CTAs by content length (1 under 600 words, 2 under 1,500, else 3; max 3; off-topic CTAs rewritten). Text and videos are never changed.
 
-## Fix and Submit
-Every task gets its SEO update prepared on the dashboard. **Fix** makes it again; **Submit** uploads the new feature image, saves the update into the CMS draft and approves. Submit only works when the update passes all checks and the writer hasn't changed the draft since. A check with no failures scores 100; warnings are notes only.
+## Approval
+**Auto-approve (on by default, switch on the dashboard):** during each run, an update that passes every check is saved in the CMS and approved straight away — no click needed. Updates that still fail a check wait on the dashboard: **Fix** makes the update again, **Submit** saves and approves it. Submit only works when the update passes and the writer hasn't changed the draft since. A check with no failures scores 100; warnings are notes only.
 
-Submit works like the CMS screen: upload image (media + mediaRef) → Start SEO review → Save → Approve by SEO. `DRY_RUN=true` blocks all CMS changes.
+Approval works like the CMS screen: upload image (media + mediaRef) → Start SEO review → Save → Approve by SEO. `DRY_RUN=true` blocks all CMS changes.
 
 ## Run locally
 ```

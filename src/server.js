@@ -15,7 +15,8 @@ const DRY_RUN = process.env.DRY_RUN === 'true';
 // Dashboard settings (pause, interval) survive restarts.
 const DATA_DIR = fileURLToPath(new URL('../data', import.meta.url));
 const SETTINGS_FILE = `${DATA_DIR}/settings.json`;
-const settings = { everyMinutes: Number(process.env.RUN_EVERY_MINUTES || 15), paused: false };
+// autoApprove: an update that passes every check is approved during the run, without Submit.
+const settings = { everyMinutes: Number(process.env.RUN_EVERY_MINUTES || 15), paused: false, autoApprove: true };
 try { Object.assign(settings, JSON.parse(readFileSync(SETTINGS_FILE, 'utf8'))); } catch { /* first start */ }
 const saveSettings = () => { mkdirSync(DATA_DIR, { recursive: true }); writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2)); };
 
@@ -23,6 +24,11 @@ const saveSettings = () => { mkdirSync(DATA_DIR, { recursive: true }); writeFile
 const SUBMITS_FILE = `${DATA_DIR}/submits.json`;
 let submits = [];
 try { submits = JSON.parse(readFileSync(SUBMITS_FILE, 'utf8')); } catch { /* none yet */ }
+// One record per approval; page = one course/specialisation page (not a silo), silo = college/exam/course silo.
+const submitEntry = (subTaskId, type, page, auto = false) => {
+  const perItem = String(page || '').includes(':');
+  return { at: new Date().toISOString(), subTaskId, type, ...(perItem ? { page } : type !== 'blogs' && page && { silo: page }), ...(auto && { auto }) };
+};
 const recordSubmit = (entry) => {
   submits = [entry, ...submits].slice(0, 2000);
   mkdirSync(DATA_DIR, { recursive: true });
@@ -72,14 +78,15 @@ async function run(trigger) {
   state.running = true;
   const started = new Date();
   try {
-    const results = await runAgent({ dryRun: DRY_RUN });
+    const results = await runAgent({ dryRun: DRY_RUN, autoApprove: settings.autoApprove });
     state.lastResults = results;
     for (const r of results) {
+      if (r.auto) recordSubmit(submitEntry(r.subTaskId, r.type, r.tab, true));
       // Log each task once per new outcome, not on every scheduled run.
       if (state.log.find((l) => l.subTaskId === r.subTaskId)?.action !== r.action) state.log.unshift({ at: started, trigger, subTaskId: r.subTaskId, title: r.title, action: r.action, score: r.result?.score, error: r.error });
     }
     state.log = state.log.slice(0, 300);
-    state.lastRun = { at: started, trigger, count: results.length, readyToSubmit: results.filter((r) => r.action === 'ready to submit').length };
+    state.lastRun = { at: started, trigger, count: results.length, readyToSubmit: results.filter((r) => r.action === 'ready to submit').length, autoApproved: results.filter((r) => r.auto).length };
     return state.lastRun;
   } catch (e) {
     state.lastRun = { at: started, trigger, error: e.message };
@@ -121,6 +128,7 @@ app.all('/api/run', async (req, res) => res.json(await run(req.query.key ? 'cron
 app.post('/api/settings', (req, res) => {
   const { paused, everyMinutes } = req.body || {};
   if (typeof paused === 'boolean') settings.paused = paused;
+  if (typeof req.body?.autoApprove === 'boolean') settings.autoApprove = req.body.autoApprove;
   if (everyMinutes !== undefined) {
     const m = Math.round(Number(everyMinutes));
     if (!(m >= 1 && m <= 1440)) return res.status(400).json({ error: 'Minutes must be between 1 and 1440' });
@@ -154,9 +162,7 @@ app.post('/api/submit/:id', async (req, res) => {
   try {
     const st = await getSubTask(req.params.id);
     const out = await submitSubTask(st);
-    const perItem = String(st.page || '').includes(':'); // one course/specialisation page, not a silo
-    recordSubmit({ at: new Date().toISOString(), subTaskId: out.subTaskId, type: st.contentCategory,
-      ...(perItem ? { page: st.page } : st.contentCategory !== 'blogs' && { silo: st.page }) });
+    recordSubmit(submitEntry(out.subTaskId, st.contentCategory, st.page));
     const r = state.lastResults.find((x) => x.id === req.params.id);
     if (r) r.action = 'fixed & approved';
     state.log.unshift({ at: new Date(), trigger: 'manual', subTaskId: out.subTaskId, title: r?.title, action: 'fixed & approved' });

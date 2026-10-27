@@ -73,6 +73,7 @@
   <div id="aiAlert" class="alert" hidden></div>
   <div class="controls">
     <button id="pause" class="secondary">Pause auto-check</button>
+    <button id="auto" class="secondary">Auto-approve: ON</button>
     <label>Check every <input id="every" type="number" min="1" max="1440" step="1"> minutes</label>
     <button id="saveEvery" class="secondary">Save</button>
     <button id="clear" class="secondary danger">Clear history</button>
@@ -106,9 +107,11 @@ const actionPill = (a) => `<span class="pill ${/^(fixed & approved|ready to subm
 async function load() {
   const s = await (await fetch('api/state')).json();
   const c = s.config;
-  $('cfg').textContent = `Checks "${c.pickUp.join(', ')}" ${c.paused ? '· AUTO-CHECK PAUSED' : `every ${c.everyMinutes} min`} → SEO update prepared → you click Submit${c.dryRun ? ' · DRY RUN (no CMS changes)' : ''}`;
+  $('cfg').textContent = `Checks "${c.pickUp.join(', ')}" ${c.paused ? '· AUTO-CHECK PAUSED' : `every ${c.everyMinutes} min`} → SEO update prepared → ${c.autoApprove ? 'approved automatically when it passes' : 'you click Submit'}${c.dryRun ? ' · DRY RUN (no CMS changes)' : ''}`;
   paused = c.paused;
+  autoApprove = c.autoApprove;
   $('pause').textContent = paused ? 'Resume auto-check' : 'Pause auto-check';
+  $('auto').textContent = `Auto-approve: ${autoApprove ? 'ON' : 'OFF'}`;
   if (document.activeElement !== $('every')) $('every').value = c.everyMinutes;
   // Anthropic problem (credit ended, bad key, rate limit, busy) → banner at the top.
   const ai = s.ai || {};
@@ -220,7 +223,7 @@ function fixPanel(x) {
     <div class="fix-head"><b>${f.isUpdate ? 'SEO update (URL kept)' : 'SEO update (new page)'}</b><span>Score ${f.before.score} → <b>${f.after.score}</b></span>
       <span class="pill ${f.after.status}">${f.after.status === 'pass' ? 'PASSES AFTER FIX' : 'STILL NEEDS WORK'}</span>
       <span class="muted">${f.submittedAt ? 'Submitted & approved' : canSubmit ? `Submit ${f.imageFile ? 'uploads the new image, ' : ''}saves this in the CMS and approves` : 'Fix the remaining issues in the CMS'}</span>${again}${submit}</div>
-    <div class="fail-text" id="submit-${x.id}"></div>
+    <div class="fail-text" id="submit-${x.id}">${x.autoError ? esc(x.autoError) : ''}</div>
     <ul>${f.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>
     ${f.imageFile ? `<div class="img"><img src="fixes/${esc(f.imageFile)}" alt="${esc(f.imageAlt)}"><div><a href="fixes/${esc(f.imageFile)}" download>Download feature image</a><br><span class="muted">Alt: ${esc(f.imageAlt)}</span></div></div>` : ''}
     <div class="copy">${fields.filter(([, k]) => f.fields[k]).map(([label, k]) => {
@@ -263,6 +266,13 @@ async function saveSettings(body) {
   await load();
   return j;
 }
+let autoApprove = true;
+$('auto').onclick = async () => {
+  if (!autoApprove || confirm('Turn off auto-approve? Updates will then wait for you to click Submit.')) {
+    const j = await saveSettings({ autoApprove: !autoApprove });
+    if (j) flash(j.autoApprove ? 'Auto-approve on: passing updates are approved during each run.' : 'Auto-approve off: click Submit to approve.');
+  }
+};
 $('pause').onclick = async () => { const j = await saveSettings({ paused: !paused }); if (j) flash(j.paused ? 'Auto-check paused. Run now still works.' : 'Auto-check resumed.'); };
 $('saveEvery').onclick = async () => { const j = await saveSettings({ everyMinutes: $('every').value }); if (j) flash(`Will check every ${j.everyMinutes} minutes.`); };
 $('clear').onclick = async () => {

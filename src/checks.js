@@ -22,6 +22,21 @@ export function ctaOffTopic(ctaText, primary, title) {
   return !topicWords.some((w) => norm(ctaText).split(' ').includes(w));
 }
 
+/** A line that reads like a CTA ("☎️ Get FREE Expert Guidance…", "Talk to an Expert"). */
+const CTA_LIKE = /☎|📞|\btalk to an? (expert|counsell?or)\b|\b(free|expert)\b[^.]{0,60}\b(guidance|counsell?ing|call|help|advice)\b/i;
+
+/**
+ * A top-level block that reads like a CTA but has no link at all: a short line with a phone icon,
+ * or a short CTA-style heading/line/one-cell box. Normal sentences (ending in "." like FAQ answers) don't count.
+ */
+export function isBareCta($, el) {
+  if (!/^(p|h2|h3|h4|table|div)$/.test(el.tagName) || $(el).find('a').length) return false;
+  if (el.tagName === 'table' && $(el).find('td, th').length !== 1) return false;
+  const t = $(el).text().replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 140 || !CTA_LIKE.test(t)) return false;
+  return /☎|📞/.test(t) || !/[.]$/.test(t);
+}
+
 /** CTAs a college/exam/course silo needs for its length. */
 export const ctaTarget = (words) => (words < 600 ? 1 : words < 1500 ? 2 : 3);
 
@@ -56,6 +71,10 @@ export function runChecks(page, rules = {}) {
   if (r.requireCta !== false) add('cta-count', `CTA form ${r.minCta}–${r.maxCta} times`,
     ctaCount >= r.minCta && ctaCount <= r.maxCta ? 'pass' : 'fail',
     `Found ${ctaCount} CTA box(es) linking to the lead form` + (ctaTexts[0] ? `: "${ctaTexts[0]}"` : ''));
+
+  // 1b. CTA lines written without the lead-form link (a CTA that leads nowhere).
+  const bareCtas = $.root().children().filter((_, el) => isBareCta($, el)).length;
+  if (bareCtas) add('cta-link', 'CTA has the form link', 'fail', `${bareCtas} CTA line(s) without the lead-form link`);
 
   // 2. CTA text should be about this article's topic (CBSE article → CBSE CTA, CAT article → CAT CTA).
   if (ctaCount && r.requireCta !== false) {

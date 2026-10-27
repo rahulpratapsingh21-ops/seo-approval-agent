@@ -5,7 +5,7 @@ import * as cheerio from 'cheerio';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { getEntityImages, searchBlogs, searchEntityPages, tabHtml, newSiloUrl } from './cms.js';
-import { runChecks, ctaOffTopic, ctaTarget, todayIST } from './checks.js';
+import { runChecks, ctaOffTopic, ctaTarget, todayIST, isBareCta } from './checks.js';
 import { renderFeatureImage, imageDataUri } from './featureImage.js';
 
 const CTA_URL = 'https://lp.selectyouruniversity.com/syu-leads-form/';
@@ -65,6 +65,10 @@ function keyPhrases(keywords) {
 }
 
 const CTA_MAX = 60;
+// Internal links: keyword links are added up to LINK_TARGET; if that still leaves fewer than
+// LINK_MIN, "Also Read" lines make up the difference.
+const LINK_TARGET = 4;
+const LINK_MIN = 3;
 const ctaPlain = ($, a) => $(a).text().replace(/[☎️\s]+/gu, ' ').trim();
 
 /**
@@ -104,6 +108,101 @@ function tidyCtas($, ctaText, primary, title, changes) {
     }
   });
   return changed;
+}
+
+const isCtaBox = ($, el) => $(el).find('a[href*="syu-leads-form"]').length > 0 || /syu-leads-form/.test($(el).attr('href') || '');
+// Previous / next element, skipping the empty lines kept around CTA boxes.
+const prevContent = ($, el) => { let p = $(el).prev(); while (p.length && isGap($, p.get(0))) p = p.prev(); return p.get(0) || null; };
+
+/** CTA lines written without the lead-form link become proper CTA boxes (own text kept when short and on topic). */
+function linkBareCtas($, ctaText, primary, title, changes) {
+  $.root().children().each((_, el) => {
+    if (!isBareCta($, el)) return;
+    const raw = $(el).text().replace(/\s+/g, ' ').trim();
+    const old = raw.replace(/[☎️📞🎓👉]/gu, '').replace(/\s+/g, ' ').trim();
+    const text = ctaOffTopic(old, primary, title) || old.length > CTA_MAX ? ctaText : old;
+    $(el).replaceWith(ctaBlock(text));
+    changes.push(`Added the form link to CTA "${old}"`);
+  });
+}
+
+/** A CTA right under a heading (before its text) or inside the FAQs moves to just before that heading / the FAQs. */
+function moveMisplacedCtas($, changes) {
+  const top = () => $.root().children().toArray();
+  const faq = top().find((el) => el.tagName === 'h2' && /faq|frequently asked/i.test($(el).text()));
+  for (const box of top().filter((el) => isCtaBox($, el))) {
+    const prev = prevContent($, box);
+    let target = null, why = '';
+    if (prev && /^h[2-4]$/.test(prev.tagName) && !isCtaBox($, prev)) { target = prev; why = `from under the heading "${$(prev).text().trim().slice(0, 50)}"`; }
+    else if (faq && top().indexOf(box) > top().indexOf(faq)) { target = faq; why = 'out of the FAQs'; }
+    if (!target) continue;
+    // Its own empty lines go with it; ctaGaps() adds fresh ones in the new place.
+    [$(box).prev().get(0), $(box).next().get(0)].filter((g) => isGap($, g)).forEach((g) => $(g).remove());
+    const html = $.html(box);
+    $(box).remove();
+    $(target).before(html);
+    changes.push(`Moved CTA ${why}`);
+  }
+  // Two CTA boxes next to each other (only empty lines between): keep the first.
+  for (const box of top().filter((el) => isCtaBox($, el))) {
+    const prev = prevContent($, box);
+    if (!prev || !isCtaBox($, prev)) continue;
+    [$(box).next().get(0)].filter((g) => isGap($, g)).forEach((g) => $(g).remove());
+    $(box).remove();
+    changes.push('Removed a CTA right next to another CTA');
+  }
+}
+
+/**
+ * Where CTAs belong in a blog, in order: after the intro (before the first H2), before a middle
+ * section, before the FAQs. free = no CTA box there yet. Articles without H2s fall back to
+ * evenly spaced blocks.
+ */
+function ctaSlots($) {
+  const top = $.root().children().toArray();
+  const h2s = top.filter((el) => el.tagName === 'h2' && !isCtaBox($, el));
+  const near = (el) => { const p = prevContent($, el); return !!p && isCtaBox($, p); };
+  if (!h2s.length) {
+    return [0.2, 0.55, 0.85].map((f) => top[Math.max(1, Math.floor(top.length * f))]).filter(Boolean)
+      .map((el, i) => ({ name: ['after the intro', 'mid-article', 'near the end'][i], before: el, free: !near(el) }));
+  }
+  const faq = h2s.find((h) => /faq|frequently asked/i.test($(h).text()));
+  const middle = h2s.filter((h) => h !== h2s[0] && h !== faq)
+    .sort((a, b) => Math.abs(top.indexOf(a) - top.length / 2) - Math.abs(top.indexOf(b) - top.length / 2))[0];
+  const introHasCta = top.slice(0, top.indexOf(h2s[0])).some((el) => isCtaBox($, el));
+  return [
+    { name: 'after the intro', before: h2s[0], free: !introHasCta },
+    middle && { name: 'mid-article', before: middle, free: !near(middle) },
+    { name: faq ? 'before the FAQs' : 'before the last section', before: faq || h2s[h2s.length - 1], free: !near(faq || h2s[h2s.length - 1]) },
+  ].filter((s, i, all) => s && all.findIndex((x) => x && x.before === s.before) === i);
+}
+
+/**
+ * All CTA work on a blog's HTML ($ loaded as a fragment):
+ * - CTA lines without the form link become CTA boxes; off-topic/long CTA text is rewritten;
+ * - CTAs right under a heading or inside the FAQs move to the section boundary;
+ * - count: a live blog with a CTA keeps its count, otherwise 2 (3 for long articles); max 3;
+ *   every blog gets the CTA right after the intro;
+ * - new CTAs go in order: after the intro, before a middle section, before the FAQs;
+ * - an empty line above and below every CTA box.
+ */
+export function arrangeBlogCtas($, ctaText, { primary, title, isUpdate }, changes) {
+  linkBareCtas($, ctaText, primary, title, changes);
+  tidyCtas($, ctaText, primary, title, changes);
+  moveMisplacedCtas($, changes);
+  const ctas = $.root().children().filter((_, el) => isCtaBox($, el)).toArray();
+  ctas.slice(3).forEach((c) => { $(c).remove(); changes.push('Removed extra CTA (max 3)'); });
+  const words = $.root().text().replace(/\s+/g, ' ').trim().split(' ').length;
+  const have = Math.min(ctas.length, 3);
+  let target = isUpdate ? (have >= 1 ? have : 2) : Math.max(have, words > 1500 ? 3 : 2);
+  const slots = ctaSlots($);
+  if (slots[0]?.free && target === have && have < 3) target++;
+  for (const slot of slots.filter((s) => s.free).slice(0, Math.max(0, Math.min(target, 3) - have))) {
+    $(slot.before).before(ctaBlock(ctaText));
+    changes.push(`Added CTA ${slot.name}: "☎️ ${ctaText} ☎️"`);
+  }
+  const gaps = ctaGaps($);
+  if (gaps) changes.push(`Added ${gaps} empty line(s) above/below CTAs`);
 }
 
 // Published articles have one empty line above and below each CTA box.
@@ -201,9 +300,15 @@ export async function fixBlog(st, draft, before, { isUpdate = false, liveUrl = n
   const needAlt = imgs.map((img, index) => ({ index, src: $(img).attr('src'), near: $(img).closest('p, figure, div').prev().text().slice(0, 150) }))
     .filter(({ index }) => !($(imgs[index]).attr('alt') || '').trim());
   const term = primary.split(/\s+/).find((w) => w.length > 2 && /[A-Z]{2,}/.test(w)) || primary.split(/\s+/).slice(0, 2).join(' ');
-  // Internal link targets: published blogs on the topic, plus the college/exam pages it names.
+  // Internal link targets: published blogs on the topic (main term, primary and secondary keywords),
+  // plus the college/exam pages it names.
+  const secondary = (Array.isArray(draft.secondaryKeywords) ? draft.secondaryKeywords : []).filter((k) => typeof k === 'string').slice(0, 2);
+  // Topic without the board/college name ("CGBSE Time Table 2027" → "Time Table 2027") finds sibling articles
+  // (other boards' time tables) for "Also Read" when the subject itself has few published pages.
+  const topic = primary.split(/\s+/).slice(1).join(' ');
   const found = [];
-  for (const t of new Set([term, primary])) found.push(...await searchBlogs(t, 20).catch(() => []));
+  for (const t of new Set([term, primary, ...secondary])) found.push(...await searchBlogs(t, 20).catch(() => []));
+  if (topic.split(' ').length >= 2) found.push(...await searchBlogs(topic, 10).catch(() => []));
   found.push(...await searchEntityPages(term).catch(() => []));
   const candidates = found.filter((c, i) => !c.url.endsWith(`/${draft.pageUrl}`) && found.findIndex((x) => x.url === c.url) === i);
 
@@ -240,20 +345,38 @@ ${plainText($)}`,
   if (response.stop_reason === 'refusal' || !response.parsed_output) throw new Error(`Claude could not produce a fix (${response.stop_reason})`);
   const plan = response.parsed_output;
 
-  // 3. Internal links on exact keywords: where another published blog's keyword appears word-for-word
-  //    in this article, link it (max 4, one per page, never on this article's own primary keyword).
+  // 3. Internal links, only when the article has fewer than LINK_TARGET: first where another published
+  //    blog's keyword appears word-for-word, then Claude's anchors (one per page, never on this
+  //    article's own primary keyword).
   const norm = (s) => String(s).toLowerCase().replace(/\s+/g, ' ').trim();
   const linked = new Set($('a').map((_, a) => $(a).attr('href')).get());
+  const existing = $('a').filter((_, a) => /^\/(?!\/)|selectyouruniversity\.com/i.test($(a).attr('href') || '') && !isCtaBox($, a)).length;
+  const room = Math.max(0, LINK_TARGET - existing);
   const pairs = candidates.flatMap((c) => keyPhrases(c.keywords).map((k) => ({ k, url: c.url })))
     .filter(({ k }) => !norm(primary).includes(norm(k)) && !norm(k).includes(norm(primary)))
     .sort((a, b) => b.k.length - a.k.length);
   // Then Claude's keyword anchors — only kept when the phrase is really in the article text.
-  const suggested = plan.internalLinks.filter((l) => candidates.some((c) => c.url === l.url) && norm(l.anchorText) !== norm(primary))
-    .map((l) => ({ k: l.anchorText, url: l.url }));  let added = 0;
+  // Website addresses ("cgbse.nic.in") are never anchors for our own pages.
+  const suggested = plan.internalLinks.filter((l) => candidates.some((c) => c.url === l.url) && norm(l.anchorText) !== norm(primary)
+    && !/^https?:|\b[\w-]+\.(com|in|org|net|gov|nic|edu|ac)\b/i.test(l.anchorText))
+    .map((l) => ({ k: l.anchorText, url: l.url }));
+  let added = 0;
   for (const { k, url } of [...pairs, ...suggested]) {
-    if (added >= 4 || linked.has(url)) continue;
+    if (added >= room || linked.has(url)) continue;
     const text = addLink($, k, url);
     if (text) { linked.add(url); added++; changes.push(`Added internal link "${text}" → ${url}`); }
+  }
+  //    Still under LINK_MIN: "👉 Also Read: <related title>" lines before later sections (article text untouched).
+  const extra = candidates.filter((c) => !linked.has(c.url) && c.title).slice(0, Math.max(0, LINK_MIN - existing - added));
+  if (extra.length) {
+    const sections = $.root().children('h2').toArray().filter((h) => !isCtaBox($, h) && !/faq|frequently asked/i.test($(h).text())).slice(1);
+    extra.forEach((c, i) => {
+      const at = sections[Math.floor(((i + 1) * sections.length) / (extra.length + 1))];
+      const line = `<p class="editor-paragraph" dir="ltr"><span style="white-space: pre-wrap;">👉 Also Read: </span><a href="${c.url}" class="editor-link"><span style="white-space: pre-wrap;">${escHtml(c.title)}</span></a></p>`;
+      if (at) $(at).before(line); else $.root().append(line);
+      linked.add(c.url);
+      changes.push(`Added "Also Read" link → ${c.url}`);
+    });
   }
 
   // 4. Alt text on in-body images.
@@ -261,24 +384,8 @@ ${plainText($)}`,
     if (imgs[index] && !($(imgs[index]).attr('alt') || '').trim()) { $(imgs[index]).attr('alt', alt); changes.push(`Added alt text to image ${index + 1}: "${alt}"`); }
   }
 
-  // 5. CTAs: CTAs that match the title stay as they are; off-topic ones get the new text.
-  //    Update task: add only when there is none. New page: top up to 2 (3 for long articles).
-  //    New CTAs go after the intro, mid-article and before the last section.
-  tidyCtas($, plan.ctaText, primary, plan.h1 || draft.title, changes);
-  const isCta = (_, el) => $(el).find(`a[href*="syu-leads-form"]`).length > 0;
-  const ctas = $.root().children().filter(isCta).toArray();
-  const words = plainText($).split(' ').length;
-  ctas.slice(3).forEach((c) => { $(c).remove(); changes.push('Removed extra CTA (max 3)'); });
-  const blocks = $.root().children().toArray();
-  const have = Math.min(ctas.length, 3);
-  const target = have >= (isUpdate ? 1 : 2) ? have : words > 1500 ? 3 : 2;
-  const spots = [0.2, 0.55, 0.85].map((f) => blocks[Math.max(1, Math.floor(blocks.length * f))]).filter(Boolean);
-  for (const spot of spots.slice(0, Math.max(0, target - have))) {
-    $(spot).after(ctaBlock(plan.ctaText));
-    changes.push(`Added CTA: "☎️ ${plan.ctaText} ☎️"`);
-  }
-  const gaps = ctaGaps($);
-  if (gaps) changes.push(`Added ${gaps} empty line(s) above/below CTAs`);
+  // 5. CTAs (see arrangeBlogCtas) and 👉 before link lines.
+  arrangeBlogCtas($, plan.ctaText, { primary, title: plan.h1 || draft.title, isUpdate }, changes);
   const pointed = pointLinks($);
   if (pointed) changes.push(`Added 👉 before ${pointed} standalone link line(s)`);
 
@@ -384,7 +491,10 @@ ${text.slice(0, 40000)}`,
   // CTAs that don't match the page (or are too long) get the new text; matching ones stay.
   for (const s of sections) {
     const $ = cheerio.load(s.content.html, null, false);
-    if (tidyCtas($, plan.ctaText, primary, plan.h1 || title, changes)) s.content.html = $.html();
+    const changesBefore = changes.length;
+    linkBareCtas($, plan.ctaText, primary, plan.h1 || title, changes);
+    tidyCtas($, plan.ctaText, primary, plan.h1 || title, changes);
+    if (changes.length > changesBefore) s.content.html = $.html();
   }
 
   // Missing CTAs: spread over the longest sections without one (several per section if needed),
