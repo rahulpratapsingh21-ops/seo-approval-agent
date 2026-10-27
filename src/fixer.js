@@ -126,14 +126,37 @@ function linkBareCtas($, ctaText, primary, title, changes) {
   });
 }
 
-/** A CTA right under a heading (before its text) or inside the FAQs moves to just before that heading / the FAQs. */
+/**
+ * The heading the "after the intro" CTA goes before: the first H2 with at least INTRO_WORDS of article
+ * text above it. Some articles open with a short "Latest Updates" H2 before the intro, so the very
+ * first H2 can sit above all the text. null when the article has no such H2.
+ */
+const INTRO_WORDS = 60;
+// True when at least INTRO_WORDS of article text come before this element.
+const hasTextBefore = ($, el) => $(el).prevAll().toArray().filter((x) => !isCtaBox($, x))
+  .reduce((n, x) => n + $(x).text().split(/\s+/).filter(Boolean).length, 0) >= INTRO_WORDS;
+function introBoundary($) {
+  let words = 0;
+  for (const el of $.root().children().toArray()) {
+    if (el.tagName === 'h2' && !isCtaBox($, el) && words >= INTRO_WORDS) return el;
+    if (!isCtaBox($, el)) words += $(el).text().split(/\s+/).filter(Boolean).length;
+  }
+  return null;
+}
+
+/**
+ * Misplaced CTAs move to the right spot: above the intro (before any real text) → after the intro;
+ * right under a heading (before its text) → just before that heading; inside the FAQs → before the FAQs.
+ */
 function moveMisplacedCtas($, changes) {
   const top = () => $.root().children().toArray();
   const faq = top().find((el) => el.tagName === 'h2' && /faq|frequently asked/i.test($(el).text()));
+  const intro = introBoundary($);
   for (const box of top().filter((el) => isCtaBox($, el))) {
     const prev = prevContent($, box);
     let target = null, why = '';
-    if (prev && /^h[2-4]$/.test(prev.tagName) && !isCtaBox($, prev)) { target = prev; why = `from under the heading "${$(prev).text().trim().slice(0, 50)}"`; }
+    if (intro && top().indexOf(box) < top().indexOf(intro) && !hasTextBefore($, box)) { target = intro; why = 'from above the intro to after it'; }
+    else if (prev && /^h[2-4]$/.test(prev.tagName) && !isCtaBox($, prev)) { target = prev; why = `from under the heading "${$(prev).text().trim().slice(0, 50)}"`; }
     else if (faq && top().indexOf(box) > top().indexOf(faq)) { target = faq; why = 'out of the FAQs'; }
     if (!target) continue;
     // Its own empty lines go with it; ctaGaps() adds fresh ones in the new place.
@@ -167,11 +190,13 @@ function ctaSlots($) {
       .map((el, i) => ({ name: ['after the intro', 'mid-article', 'near the end'][i], before: el, free: !near(el) }));
   }
   const faq = h2s.find((h) => /faq|frequently asked/i.test($(h).text()));
-  const middle = h2s.filter((h) => h !== h2s[0] && h !== faq)
+  // After the intro = before the first H2 with real text above it (not an opening "Latest Updates" H2).
+  const intro = introBoundary($) || h2s.find((h) => h !== faq) || h2s[0];
+  const middle = h2s.filter((h) => h !== intro && h !== faq && top.indexOf(h) > top.indexOf(intro))
     .sort((a, b) => Math.abs(top.indexOf(a) - top.length / 2) - Math.abs(top.indexOf(b) - top.length / 2))[0];
-  const introHasCta = top.slice(0, top.indexOf(h2s[0])).some((el) => isCtaBox($, el));
+  const introHasCta = top.slice(0, top.indexOf(intro)).some((el) => isCtaBox($, el) && hasTextBefore($, el));
   return [
-    { name: 'after the intro', before: h2s[0], free: !introHasCta },
+    { name: 'after the intro', before: intro, free: !introHasCta },
     middle && { name: 'mid-article', before: middle, free: !near(middle) },
     { name: faq ? 'before the FAQs' : 'before the last section', before: faq || h2s[h2s.length - 1], free: !near(faq || h2s[h2s.length - 1]) },
   ].filter((s, i, all) => s && all.findIndex((x) => x && x.before === s.before) === i);

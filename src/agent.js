@@ -45,7 +45,7 @@ export async function checkAll() {
 
 // One fix per saved draft version, so a draft is only sent to Claude again after the writer changes it.
 // FIX_VERSION goes up when the fix rules change, so older saved fixes are made again.
-const FIX_VERSION = 6;
+const FIX_VERSION = 7;
 const fixPath = (id) => `${FIX_DIR}/${id}.json`;
 export function getFix(subTaskId) {
   try { return JSON.parse(readFileSync(fixPath(subTaskId), 'utf8')); } catch { return null; }
