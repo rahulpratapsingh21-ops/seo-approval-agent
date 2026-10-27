@@ -12,7 +12,7 @@ where node >nul 2>nul || (
 rem Already running? Then only open the dashboard.
 netstat -ano | findstr ":3000" | findstr "LISTENING" >nul && (
   echo  SEO Approval Agent is already running. Opening the dashboard...
-  start "" http://localhost:3000
+  start chrome http://localhost:3000
   timeout /t 3 >nul
   exit /b
 )
@@ -28,7 +28,7 @@ echo  Dashboard: http://localhost:3000  (opens in your browser in a few seconds)
 echo  Keep this window open. Closing it stops the agent.
 echo.
 rem Open the browser once the agent has had time to start.
-start "" /min cmd /c "timeout /t 5 >nul & start http://localhost:3000"
+start "" /min cmd /c "timeout /t 5 >nul & start chrome http://localhost:3000"
 rem Run node directly (not "npm start") to save the memory of an extra npm process.
 node --max-old-space-size=380 src/server.js
 echo.
