@@ -144,6 +144,20 @@ function introBoundary($) {
   return null;
 }
 
+const isImageOnly = ($, el) => /^(p|figure|div)$/.test(el.tagName) && !$(el).text().trim() && $(el).find('img').length > 0;
+
+/**
+ * Exact spot for the intro CTA: right after the last line of intro text (e.g. a "👉 … Direct Link" line),
+ * ahead of any images or empty lines before the next heading. Returns the element to insert before.
+ */
+function introSpot($) {
+  const heading = introBoundary($);
+  if (!heading) return null;
+  let el = $(heading).prev().get(0);
+  while (el && (isGap($, el) || isImageOnly($, el) || isCtaBox($, el))) el = $(el).prev().get(0);
+  return el ? $(el).next().get(0) : heading;
+}
+
 /**
  * Misplaced CTAs move to the right spot: above the intro (before any real text) → after the intro;
  * right under a heading (before its text) → just before that heading; inside the FAQs → before the FAQs.
@@ -155,7 +169,16 @@ function moveMisplacedCtas($, changes) {
   for (const box of top().filter((el) => isCtaBox($, el))) {
     const prev = prevContent($, box);
     let target = null, why = '';
-    if (intro && top().indexOf(box) < top().indexOf(intro) && !hasTextBefore($, box)) { target = intro; why = 'from above the intro to after it'; }
+    if (intro && top().indexOf(box) < top().indexOf(intro) && !hasTextBefore($, box)) {
+      // Take it out first, then find the spot after the intro text (it may have been in the way).
+      [$(box).prev().get(0), $(box).next().get(0)].filter((g) => isGap($, g)).forEach((g) => $(g).remove());
+      const html = $.html(box);
+      $(box).remove();
+      $(introSpot($) || intro).before(html);
+      changes.push('Moved CTA from above the intro to after it');
+      continue;
+    }
+    if (prev && /^h[2-4]$/.test(prev.tagName) && !isCtaBox($, prev)) { target = prev; why = `from under the heading "${$(prev).text().trim().slice(0, 50)}"`; }
     else if (prev && /^h[2-4]$/.test(prev.tagName) && !isCtaBox($, prev)) { target = prev; why = `from under the heading "${$(prev).text().trim().slice(0, 50)}"`; }
     else if (faq && top().indexOf(box) > top().indexOf(faq)) { target = faq; why = 'out of the FAQs'; }
     if (!target) continue;
@@ -196,7 +219,7 @@ function ctaSlots($) {
     .sort((a, b) => Math.abs(top.indexOf(a) - top.length / 2) - Math.abs(top.indexOf(b) - top.length / 2))[0];
   const introHasCta = top.slice(0, top.indexOf(intro)).some((el) => isCtaBox($, el) && hasTextBefore($, el));
   return [
-    { name: 'after the intro', before: intro, free: !introHasCta },
+    { name: 'after the intro', before: introSpot($) || intro, free: !introHasCta },
     middle && { name: 'mid-article', before: middle, free: !near(middle) },
     { name: faq ? 'before the FAQs' : 'before the last section', before: faq || h2s[h2s.length - 1], free: !near(faq || h2s[h2s.length - 1]) },
   ].filter((s, i, all) => s && all.findIndex((x) => x && x.before === s.before) === i);
