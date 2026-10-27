@@ -501,7 +501,7 @@ ${plainText($)}`,
   //    an AI photo (with an image-AI key) → the college/exam campus photo from the CMS →
   //    only when there is no photo at all, the drawn desk design.
   const pics = await getEntityImages(draft, `${primary} ${draft.title}`).catch(() => ({}));
-  const logo = await imageDataUri(pics.logo, { format: 'png', width: 300 });
+  const logo = await imageDataUri(pics.logo, { format: 'png', width: 300, trim: true });
   let png = null, how = '';
   if (imageAiReady()) {
     try {

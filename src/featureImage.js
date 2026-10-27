@@ -97,11 +97,13 @@ const notebook = `<g transform="rotate(-4 600 630)"><rect x="470" y="596" width=
   <rect x="712" y="630" width="30" height="4" rx="2" fill="#d4a017"/><path d="M600 634 L578 640 L600 646 Z" fill="#c9a26b"/><path d="M584 638 L578 640 L584 642 Z" fill="#1b2a4a"/></g>`;
 
 /** Fetch an image as a data URI; ImageKit URLs are converted to PNG/JPG at a useful width. */
-export async function imageDataUri(url, { format = 'png', width = 300 } = {}) {
+export async function imageDataUri(url, { format = 'png', width = 300, trim = false } = {}) {
   if (!url) return null;
   try {
-    const u = /ik\.imagekit\.io/.test(url) ? `${url.split('?')[0]}?tr=f-${format},w-${width}` : url;
-    const r = await fetch(u);
+    // trim: ImageKit cuts the empty border around a logo (t-true), so the logo fills its circle.
+    const kit = (t) => `${url.split('?')[0]}?tr=f-${format},w-${width}${t ? ',t-true' : ''}`;
+    let r = await fetch(/ik\.imagekit\.io/.test(url) ? kit(trim) : url);
+    if (!r.ok && trim && /ik\.imagekit\.io/.test(url)) r = await fetch(kit(false));
     if (!r.ok) return null;
     const type = r.headers.get('content-type') || '';
     if (!/png|jpe?g/.test(type)) return null;
@@ -115,17 +117,24 @@ export async function imageDataUri(url, { format = 'png', width = 300 } = {}) {
  * the right and the SYU brand top right. All text is drawn here, never by the image AI.
  * text: { line1: "CGBSE", line2: "Time Table", year: "2027" }; images: { scene (required), logo } as data URIs.
  */
-export function renderSceneImage({ line1, line2 = '', year = '' }, { scene, logo = null }) {
-  const cx = logo ? 520 : 600;
-  const maxW = logo ? 640 : 900;
-  // Rows: title (1–2 lines) on navy, line2 on yellow, year on pink.
+export function renderSceneImage({ line1, line2 = '', year = '' }, { scene, logo = null, logoBox = 160 }) {
+  const cx = logo ? 500 : 600;
+  const maxW = logo ? 700 : 900;
+  // Compact title so the photo stays visible: line1 on navy (one line; wrapped only when very long),
+  // line2 on yellow, year on pink. Max 3 strokes; text shrinks to fit the width.
+  const title = line1.length > 26 ? wrap(line1, 20) : [line1];
   const rows = [
-    ...wrap(line1, logo ? 14 : 20).map((t) => ({ t, fill: NAVY, color: '#ffffff', max: 108 })),
-    ...(line2 ? [{ t: line2, fill: YELLOW, color: NAVY, max: 92 }] : []),
-    ...(year ? [{ t: year, fill: PINK, color: '#ffffff', max: 104 }] : []),
+    ...title.map((t) => ({ t, fill: NAVY, color: '#ffffff', max: title.length > 1 ? 70 : 88 })),
+    ...(line2 ? [{ t: line2, fill: YELLOW, color: NAVY, max: 72 }] : []),
+    ...(year && title.length < 2 ? [{ t: year, fill: PINK, color: '#ffffff', max: 84 }] : []),
   ].map((r) => ({ ...r, size: fit(r.t, maxW - 90, r.max) }));
-  const gap = 14;
-  const heights = rows.map((r) => r.size * 1.32);
+  // A long title takes two navy lines, so the year joins the yellow line instead of its own stroke.
+  if (year && title.length > 1) {
+    const y2 = rows.find((r) => r.fill === YELLOW);
+    if (y2) { y2.t = `${y2.t} ${year}`; y2.size = fit(y2.t, maxW - 90, 72); } else rows.push({ t: year, fill: PINK, color: '#ffffff', size: fit(year, maxW - 90, 84) });
+  }
+  const gap = 12;
+  const heights = rows.map((r) => r.size * 1.3);
   let y = 330 - (heights.reduce((a, b) => a + b, 0) + gap * (rows.length - 1)) / 2;
   const strokes = rows.map((r, i) => {
     const cy = y + heights[i] / 2;
@@ -136,7 +145,7 @@ export function renderSceneImage({ line1, line2 = '', year = '' }, { scene, logo
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
-    <clipPath id="logoClip"><circle cx="1040" cy="300" r="100"/></clipPath>
+    <clipPath id="logoClip"><circle cx="1040" cy="300" r="110"/></clipPath>
     <radialGradient id="glow" cx="${cx / W}" cy="0.48" r="0.42"><stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.28"/></filter>
   </defs>
@@ -149,7 +158,7 @@ export function renderSceneImage({ line1, line2 = '', year = '' }, { scene, logo
     <text x="980" y="96" font-family="Poppins" font-weight="700" font-size="16" fill="${PINK}">YOUR UNIVERSITY</text>
   </g>
   ${logo ? `<g filter="url(#shadow)"><circle cx="1040" cy="300" r="118" fill="#ffffff"/></g>
-  <image href="${logo}" x="965" y="225" width="150" height="150" preserveAspectRatio="xMidYMid meet" clip-path="url(#logoClip)"/>` : ''}
+  <image href="${logo}" x="${1040 - logoBox / 2}" y="${300 - logoBox / 2}" width="${logoBox}" height="${logoBox}" preserveAspectRatio="xMidYMid meet" clip-path="url(#logoClip)"/>` : ''}
   <g transform="rotate(-3 ${cx} 330)">${strokes}</g>
 </svg>`;
   return new Resvg(svg, { font: { fontFiles: FONTS, loadSystemFonts: false, defaultFontFamily: 'Poppins' }, fitTo: { mode: 'width', value: W } }).render().asPng();
