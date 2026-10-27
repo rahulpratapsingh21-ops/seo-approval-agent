@@ -6,7 +6,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { getEntityImages, searchBlogs, searchEntityPages, tabHtml, newSiloUrl } from './cms.js';
 import { runChecks, ctaOffTopic, ctaTarget, todayIST, isBareCta } from './checks.js';
-import { renderFeatureImage, imageDataUri } from './featureImage.js';
+import { renderFeatureImage, renderSceneImage, imageDataUri } from './featureImage.js';
+import { imageAiReady, generateScene } from './imageGen.js';
 
 const CTA_URL = 'https://lp.selectyouruniversity.com/syu-leads-form/';
 const COMPETITORS = /shiksha\.com|collegedunia\.com|careers360\.com|collegedekho\.com|getmyuni\.com|jagranjosh\.com|leverageedu\.com/i;
@@ -32,7 +33,8 @@ const FixPlan = z.object({
     year: z.string().describe('The year the article is about, e.g. "2026"; empty if none.'),
     tags: z.array(z.string()).describe('2–5 short labels from the article for the book spines, max 8 chars each: courses (e.g. "BA", "B.Tech", "MBA"), classes ("SSC", "HSC") or sections ("VARC", "QA").'),
     screen: z.string().describe('1–2 words for the laptop screen, e.g. "Results", "Admit Card", "Answer Key".'),
-  }).describe('Text for the feature image, taken from the article.'),
+    scene: z.string().describe('One sentence describing a realistic photo for this article, for an image AI: Indian students, exam/college setting and objects that fit the topic, e.g. "An Indian Class 12 student in school uniform studying at a wooden desk with textbooks, an exam calendar and an alarm clock, a state board office building in the background". Person on the left, no text or logos.'),
+  }).describe('Text and photo idea for the feature image, taken from the article.'),
 });
 
 const SYSTEM = `You are the SEO editor for SelectYourUniversity (SYU), an Indian education portal for exams, colleges and courses.
@@ -495,16 +497,24 @@ ${plainText($)}`,
   if (!(draft.authorName || '').trim() && writer) setField('authorName', 'Writer', writer);
 
   // 7. New feature image (uploaded and set as hero image on Submit).
-  //    Logo and campus photo come from the college/exam the article is about.
+  //    With an image-AI key: an AI photo scene with the title, year, logo and brand drawn on top.
+  //    Without one (or if the AI fails): the drawn design. The logo (and campus photo) come from the CMS.
   const pics = await getEntityImages(draft, `${primary} ${draft.title}`).catch(() => ({}));
-  const images = {
-    logo: await imageDataUri(pics.logo, { format: 'png', width: 300 }),
-    photo: await imageDataUri(pics.cover, { format: 'jpg', width: 1200 }),
-  };
+  const logo = await imageDataUri(pics.logo, { format: 'png', width: 300 });
+  let png = null, how = 'drawn design';
+  if (imageAiReady()) {
+    try {
+      png = renderSceneImage(plan.featureImage, { scene: await generateScene(plan.featureImage.scene), logo });
+      how = 'AI photo background';
+    } catch (e) {
+      how = `drawn design — AI photo failed: ${e.message.slice(0, 120)}`;
+    }
+  }
+  png ??= renderFeatureImage(plan.featureImage, { logo, photo: await imageDataUri(pics.cover, { format: 'jpg', width: 1200 }) });
   mkdirSync(FIX_DIR, { recursive: true });
   const imageFile = `${st.subTaskId}-feature.png`;
-  writeFileSync(`${FIX_DIR}/${imageFile}`, renderFeatureImage(plan.featureImage, images));
-  changes.push(`Created new feature image (alt: "${h1}")`);
+  writeFileSync(`${FIX_DIR}/${imageFile}`, png);
+  changes.push(`Created new feature image, ${how} (alt: "${h1}")`);
 
   const after = runChecks({ ...draft, ...fields, html: fields.html ?? draft.html, primaryKeywords: draft.primaryKeywords, heroImage: imageFile, isUpdate, liveUrl }, rules);
   // Nothing is written here; Submit on the dashboard saves these fields and approves.

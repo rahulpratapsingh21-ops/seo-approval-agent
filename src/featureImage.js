@@ -110,6 +110,52 @@ export async function imageDataUri(url, { format = 'png', width = 300 } = {}) {
 }
 
 /**
+ * Feature image on an AI photo scene, laid out like the SYU sample: big stacked title — line1 on a
+ * navy brush stroke, line2 on yellow, the year on pink — the board/college logo in a white circle on
+ * the right and the SYU brand top right. All text is drawn here, never by the image AI.
+ * text: { line1: "CGBSE", line2: "Time Table", year: "2027" }; images: { scene (required), logo } as data URIs.
+ */
+export function renderSceneImage({ line1, line2 = '', year = '' }, { scene, logo = null }) {
+  const cx = logo ? 520 : 600;
+  const maxW = logo ? 640 : 900;
+  // Rows: title (1–2 lines) on navy, line2 on yellow, year on pink.
+  const rows = [
+    ...wrap(line1, logo ? 14 : 20).map((t) => ({ t, fill: NAVY, color: '#ffffff', max: 108 })),
+    ...(line2 ? [{ t: line2, fill: YELLOW, color: NAVY, max: 92 }] : []),
+    ...(year ? [{ t: year, fill: PINK, color: '#ffffff', max: 104 }] : []),
+  ].map((r) => ({ ...r, size: fit(r.t, maxW - 90, r.max) }));
+  const gap = 14;
+  const heights = rows.map((r) => r.size * 1.32);
+  let y = 330 - (heights.reduce((a, b) => a + b, 0) + gap * (rows.length - 1)) / 2;
+  const strokes = rows.map((r, i) => {
+    const cy = y + heights[i] / 2;
+    y += heights[i] + gap;
+    return `<g filter="url(#shadow)">${brush(cx, cy, textW(r.t, r.size) + 90, heights[i], r.fill, 7 + i * 4)}</g>
+    <text x="${cx}" y="${cy + r.size * 0.36}" text-anchor="middle" font-family="Poppins" font-weight="800" font-size="${r.size}" fill="${r.color}">${esc(r.t)}</text>`;
+  }).join('');
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <defs>
+    <clipPath id="logoClip"><circle cx="1040" cy="300" r="100"/></clipPath>
+    <radialGradient id="glow" cx="${cx / W}" cy="0.48" r="0.42"><stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.28"/></filter>
+  </defs>
+  <image href="${scene}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
+  <rect width="${W}" height="${H}" fill="url(#glow)"/>
+  <g filter="url(#shadow)">
+    <rect x="890" y="24" width="286" height="84" rx="16" fill="#ffffff"/>
+    <image href="${SYU_ICON}" x="904" y="34" width="64" height="64"/>
+    <text x="978" y="72" font-family="Poppins" font-weight="800" font-size="38" fill="${NAVY}">SELECT</text>
+    <text x="980" y="96" font-family="Poppins" font-weight="700" font-size="16" fill="${PINK}">YOUR UNIVERSITY</text>
+  </g>
+  ${logo ? `<g filter="url(#shadow)"><circle cx="1040" cy="300" r="118" fill="#ffffff"/></g>
+  <image href="${logo}" x="940" y="200" width="200" height="200" preserveAspectRatio="xMidYMid meet" clip-path="url(#logoClip)"/>` : ''}
+  <g transform="rotate(-3 ${cx} 330)">${strokes}</g>
+</svg>`;
+  return new Resvg(svg, { font: { fontFiles: FONTS, loadSystemFonts: false, defaultFontFamily: 'Poppins' }, fitTo: { mode: 'width', value: W } }).render().asPng();
+}
+
+/**
  * text: { line1: "Bharathidasan University", line2: "Results", year: "2026", tags: ["BA","BSc"], screen: "Results" }
  * images: { logo, photo } as data URIs (optional). Returns a PNG Buffer (1200×675).
  */
