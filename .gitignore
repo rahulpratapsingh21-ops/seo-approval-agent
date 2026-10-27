@@ -2,5 +2,4 @@
 node_modules
 data/
 *.log
-START-DASHBOARD.bat
 UPLOAD-TO-GITHUB.bat
