@@ -11,6 +11,9 @@
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
   main { max-width:1320px; margin:0 auto; padding:20px 16px 60px; }
+  .byid { display:flex; flex-wrap:wrap; gap:10px; align-items:center; background:var(--card); border:1px solid var(--accent); border-radius:10px; padding:12px 14px; margin-bottom:12px; }
+  .byid label { display:flex; flex-direction:column; margin-right:4px; } .byid label small { color:var(--muted); font-size:12px; }
+  .byid input { width:140px; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); font-size:15px; }
   .alert { border-radius:10px; padding:12px 14px; margin-bottom:12px; font-weight:600; border:1px solid var(--fail); background:var(--fail-bg); color:var(--fail); }
   .alert.temp { border-color:var(--warn); background:var(--warn-bg); color:var(--warn); }
   .alert small { display:block; font-weight:400; opacity:.85; }
@@ -71,6 +74,12 @@
     <button id="run">Run now</button>
   </header>
   <div id="aiAlert" class="alert" hidden></div>
+  <form class="byid" id="byIdForm">
+    <label for="taskId"><b>Fix a task by ID</b><small>Task ID (e.g. 48251) or subtask ID — for tasks in Ready for / In SEO review</small></label>
+    <input id="taskId" inputmode="numeric" placeholder="Task ID" autocomplete="off" required>
+    <button id="byIdBtn" type="submit">Check, fix &amp; submit</button>
+    <span id="byIdMsg" class="muted"></span>
+  </form>
   <div class="controls">
     <button id="pause" class="secondary">Pause auto-check</button>
     <button id="auto" class="secondary">Auto-approve: ON</button>
@@ -144,10 +153,11 @@ async function load() {
     // Once fixed (approved or ready), show the result after the fix: PASS, "45 → 100", CTAs after.
     const fixed = x.fix?.after && /^(fixed & approved|ready to submit)$/.test(x.action);
     const res = (fixed ? x.fix.after : x.result) || { checks: [] };
-    const cls = x.action === 'error' ? 'fail' : res.status;
+    const cls = x.action === 'error' ? 'fail' : x.action === 'skipped' ? 'warn' : res.status;
+    const label = x.action === 'error' ? 'ERROR' : x.action === 'skipped' ? 'SKIPPED' : String(res.status || '').toUpperCase();
     const url = (fixed && x.fix.fields?.pageUrl) || x.pageUrl || '';
     return `<details class="item" data-id="${x.id}"><summary>
-      <span class="pill ${cls}">${x.action === 'error' ? 'ERROR' : res.status.toUpperCase()}</span>
+      <span class="pill ${cls}">${label}</span>
       <span class="title">${esc(x.title)}<small>${x.isUpdate ? '<b>Update task</b> (URL kept)' : x.result ? '<b>New page</b>' : ''} · ${esc(x.type || '')}${x.tab ? ' › ' + esc(x.tab) : ''} · Task #${esc(x.subTaskId)} · /${esc(url)} · CTA ${res.ctaCount ?? '—'} · ${res.words ?? '—'} words</small></span>
       <span class="muted">${fixed ? `${x.result?.score ?? ''} → <b>${res.score}</b>` : res.score ?? ''}</span>${actionPill(x.action)}
     </summary><div class="checks">${x.error ? esc(x.error) : res.checks.map((k) =>
@@ -269,6 +279,23 @@ async function saveSettings(body) {
   await load();
   return j;
 }
+// Fix a task by ID: check → fix → approve (auto-approve on) or show Submit.
+$('byIdForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const id = $('taskId').value.trim();
+  if (!id) return;
+  $('byIdBtn').disabled = true; $('byIdBtn').textContent = 'Working… (about 1 min per article)'; $('byIdMsg').textContent = '';
+  try {
+    const r = await fetch('api/task/' + encodeURIComponent(id), { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) { $('byIdMsg').textContent = j.error; return; }
+    $('byIdMsg').textContent = j.results.map((x) => `#${x.subTaskId}: ${x.action}${x.error ? ' — ' + x.error : ''}`).join(' · ');
+    category = 'all'; $('taskId').value = '';
+    await load();
+    document.querySelector(`details[data-id]`)?.setAttribute('open', '');
+  } finally { $('byIdBtn').disabled = false; $('byIdBtn').textContent = 'Check, fix & submit'; }
+};
+
 let autoApprove = true;
 $('auto').onclick = async () => {
   if (!autoApprove || confirm('Turn off auto-approve? Updates will then wait for you to click Submit.')) {

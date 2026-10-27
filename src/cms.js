@@ -323,6 +323,18 @@ export async function newSiloUrl(type, draft) {
   return [...count].sort((a, b) => b[1] - a[1])[0]?.[0] || slugify(tab.replace(/([A-Z])/g, '-$1'));
 }
 
+/**
+ * Subtasks for a number typed on the dashboard: a task ID (e.g. 48251) gives all its subtasks
+ * (every silo of a college), a subtask ID (e.g. 36041) gives that one. Task IDs are tried first.
+ */
+export async function findSubTasksByNumber(num) {
+  const n = Number(String(num).replace(/\D/g, ''));
+  if (!n) return [];
+  const task = (await api(`/tasks?${qs({ 'where[taskId][equals]': n, limit: 1, depth: 0 })}`)).docs[0];
+  if (task) return (await api(`/subTasks?${qs({ 'where[parentTaskId][equals]': task.id, limit: 50, depth: 0 })}`)).docs;
+  return (await api(`/subTasks?${qs({ 'where[subTaskId][equals]': n, limit: 1, depth: 0 })}`)).docs;
+}
+
 export async function getSubTask(id) {
   return api(`/subTasks/${id}?depth=0`);
 }

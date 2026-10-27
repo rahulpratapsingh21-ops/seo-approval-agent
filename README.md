@@ -28,6 +28,8 @@ Each silo (overview, admissions, results, …) is checked on its own. It is an *
 The fix rewrites the H1 (page display title), meta title and meta description from the current content and sets CTAs by content length (1 under 600 words, 2 under 1,500, else 3; max 3; off-topic CTAs rewritten). Text and videos are never changed.
 
 ## Approval
+**Fix a task by ID (dashboard box):** type a task ID (all its subtasks, e.g. every silo) or a subtask ID. Each one in Ready for SEO review or In SEO review is checked, fixed and approved (auto-approve on) or shown with Submit; other statuses are skipped with the reason.
+
 **Auto-approve (on by default, switch on the dashboard):** during each run, an update that passes every check is saved in the CMS and approved straight away — no click needed. Updates that still fail a check wait on the dashboard: **Fix** makes the update again, **Submit** saves and approves it. Submit only works when the update passes and the writer hasn't changed the draft since. A check with no failures scores 100; warnings are notes only.
 
 Approval works like the CMS screen: upload image (media + mediaRef) → Start SEO review → Save → Approve by SEO. `DRY_RUN=true` blocks all CMS changes.

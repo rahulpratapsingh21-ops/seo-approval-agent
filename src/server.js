@@ -2,9 +2,9 @@ import 'dotenv/config';
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { runAgent, checkSubTask, fixSubTask, submitSubTask, aiStatus } from './agent.js';
+import { runAgent, checkSubTask, fixSubTask, submitSubTask, decide, aiStatus } from './agent.js';
 import { FIX_DIR } from './fixer.js';
-import { getSubTask, countSubTasks, countApprovedSince, STATUS } from './cms.js';
+import { getSubTask, countSubTasks, countApprovedSince, findSubTasksByNumber, STATUS, TYPES } from './cms.js';
 import { todayIST } from './checks.js';
 
 const app = express();
@@ -158,6 +158,34 @@ app.post('/api/fix/:id', async (req, res) => {
     res.json(fix);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// One task on demand (typed on the dashboard): check, fix, and approve (auto-approve on) or wait for Submit.
+// Works for Ready for SEO review and In SEO review — the CMS lets the SEO manager approve only those.
+const REVIEWABLE = ['readyForSEOReview', 'inSEOReview'];
+app.post('/api/task/:num', async (req, res) => {
+  try {
+    const subs = (await findSubTasksByNumber(req.params.num)).filter((s) => TYPES[s.contentCategory]);
+    if (!subs.length) return res.status(404).json({ error: `No blog, college, exam or course task found for #${req.params.num}` });
+    const results = [];
+    for (const st of subs) {
+      if (!REVIEWABLE.includes(st.status)) {
+        results.push({ id: st.id, subTaskId: st.subTaskId, title: st.title, type: st.contentCategory, action: 'skipped',
+          error: `Status is "${st.status}" — only tasks in Ready for SEO review or In SEO review can be fixed and approved.` });
+        continue;
+      }
+      const r = await decide(st, { dryRun: DRY_RUN, autoApprove: settings.autoApprove });
+      if (r.auto) recordSubmit(submitEntry(r.subTaskId, r.type, r.tab, true));
+      results.push(r);
+    }
+    // Show them at the top of the dashboard list and in the activity log.
+    for (const r of results.slice().reverse()) {
+      state.lastResults = [r, ...state.lastResults.filter((x) => x.subTaskId !== r.subTaskId)];
+      state.log.unshift({ at: new Date(), trigger: 'by ID', subTaskId: r.subTaskId, title: r.title, action: r.action,
+        score: r.fix?.after && r.action !== 'needs fix' ? `${r.result?.score} → ${r.fix.after.score}` : r.result?.score, error: r.error });
+    }
+    res.json({ results: results.map((r) => ({ subTaskId: r.subTaskId, title: r.title, action: r.action, error: r.error || r.autoError })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/submit/:id', async (req, res) => {
   if (DRY_RUN) return res.status(400).json({ error: 'Test mode (DRY_RUN=true) — set DRY_RUN=false in .env to submit to the CMS' });
   try {
