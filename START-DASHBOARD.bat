@@ -29,7 +29,8 @@ echo  Keep this window open. Closing it stops the agent.
 echo.
 rem Open the browser once the agent has had time to start.
 start "" /min cmd /c "timeout /t 5 >nul & start http://localhost:3000"
-call npm start
+rem Run node directly (not "npm start") to save the memory of an extra npm process.
+node --max-old-space-size=380 src/server.js
 echo.
 echo  The agent stopped. Press any key to close this window.
 pause >nul
