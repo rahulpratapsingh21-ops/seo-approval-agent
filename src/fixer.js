@@ -33,9 +33,9 @@ const FixPlan = z.object({
   })).describe('2–4 links, one per URL, only candidate URLs. For each related candidate, find the phrase in the article that names its topic (e.g. "GSEB HSC exam" for a GSEB HSC result page). Leave out candidates with no such phrase.'),
   imageAlts: z.array(z.object({ index: z.number(), alt: z.string() })).describe('Alt text for each listed in-body image missing alt, 8–15 words, descriptive, includes the keyword where natural.'),
   featureImage: z.object({
-    line1: z.string().describe('Main title, max 26 chars, e.g. "Bharathidasan University" or "CAT Question Paper".'),
-    line2: z.string().describe('What it is about, max 20 chars, e.g. "Results", "PDF With Solutions", "Admit Card".'),
-    year: z.string().describe('The year the article is about, e.g. "2026"; empty if none.'),
+    line1: z.string().describe('Taken word-for-word from YOUR H1 (its main part, before any ":"): the exam/board/college name, max 26 chars, e.g. "CGBSE" from "CGBSE Time Table 2027: …".'),
+    line2: z.string().describe('The rest of the H1 main part after line1, without the year, word-for-word, max 20 chars, e.g. "Time Table".'),
+    year: z.string().describe('The year in the H1 main part, e.g. "2027"; empty if none.'),
     tags: z.array(z.string()).describe('2–5 short labels from the article for the book spines, max 8 chars each: courses (e.g. "BA", "B.Tech", "MBA"), classes ("SSC", "HSC") or sections ("VARC", "QA").'),
     screen: z.string().describe('1–2 words for the laptop screen, e.g. "Results", "Admit Card", "Answer Key".'),
     scene: z.string().describe('One sentence describing a realistic photo for this article, for an image AI: Indian students, exam/college setting and objects that fit the topic, e.g. "An Indian Class 12 student in school uniform studying at a wooden desk with textbooks, an exam calendar and an alarm clock, a state board office building in the background". Person on the left, no text or logos.'),
@@ -371,6 +371,26 @@ function addLink($, anchor, url) {
 }
 
 /**
+ * Feature-image text from the H1 (so the image matches the heading): its main part (before ":", "–", "|"),
+ * split into line1 (name), line2 (the rest) and year. Claude's split is kept when its words all come
+ * from that main part; otherwise the main part is split here.
+ */
+export function imageTextFromH1(h1, suggested = {}) {
+  const head = String(h1 || '').split(/\s*[:|–—]\s*|\s+-\s+/)[0].replace(/\s+/g, ' ').trim();
+  const words = (s) => String(s || '').toLowerCase().match(/[a-z0-9.&+]+/g) || [];
+  const inHead = new Set(words(head));
+  const s = { line1: suggested.line1 || '', line2: suggested.line2 || '', year: suggested.year || '' };
+  const fromHead = [s.line1, s.line2, s.year].every((x) => words(x).every((w) => inHead.has(w))) && words(s.line1).length > 0;
+  if (fromHead) return { ...suggested, ...s };
+  const year = (head.match(/\b(20\d\d(?:-\d\d)?)\b/g) || []).pop() || '';
+  const rest = head.replace(year, '').replace(/\s+/g, ' ').trim().split(' ');
+  // Name = a leading acronym ("CGBSE") or the first half; the rest goes on line 2.
+  let cut = /^[A-Z0-9&.-]{2,}$/.test(rest[0]) ? 1 : Math.ceil(rest.length / 2);
+  while (cut > 1 && rest.slice(0, cut).join(' ').length > 26) cut--;
+  return { ...suggested, line1: rest.slice(0, cut).join(' '), line2: rest.slice(cut).join(' '), year };
+}
+
+/**
  * Prepares a blog draft for Submit. The article body text is never changed.
  * Always: H1, meta title + description from the current content, a new feature image, internal links on exact keywords.
  * Update task (URL live): URL kept; CTAs added only when there are none.
@@ -505,12 +525,14 @@ ${plainText($)}`,
   //    (stacked brush-stroke title, logo on the right, SYU brand) on the best photo available:
   //    an AI photo (with an image-AI key) → the college/exam campus photo from the CMS →
   //    only when there is no photo at all, the drawn desk design.
+  //    The image text comes from the final H1 (see imageTextFromH1), so image and heading match.
+  const text = imageTextFromH1(h1, plan.featureImage);
   const pics = await getEntityImages(draft, `${primary} ${draft.title}`).catch(() => ({}));
   const logo = await imageDataUri(pics.logo, { format: 'png', width: 300, trim: true });
   let png = null, how = '';
   if (imageAiReady()) {
     try {
-      png = renderSceneImage(plan.featureImage, { scene: await generateScene(plan.featureImage.scene), logo, personLeft: true });
+      png = renderSceneImage(text, { scene: await generateScene(plan.featureImage.scene), logo, personLeft: true });
       how = `AI photo background (${imageAiName()})`;
     } catch (e) {
       how = ` (${imageAiName()} photo failed: ${e.message.slice(0, 120)})`;
@@ -518,8 +540,8 @@ ${plainText($)}`,
   }
   if (!png) {
     const campus = await imageDataUri(pics.cover, { format: 'jpg', width: 1200 });
-    if (campus) { png = renderSceneImage(plan.featureImage, { scene: campus, logo }); how = `campus photo${how}`; }
-    else { png = renderFeatureImage(plan.featureImage, { logo }); how = `drawn design${how}`; }
+    if (campus) { png = renderSceneImage(text, { scene: campus, logo }); how = `campus photo${how}`; }
+    else { png = renderFeatureImage(text, { logo }); how = `drawn design${how}`; }
   }
   mkdirSync(FIX_DIR, { recursive: true });
   const imageFile = `${st.subTaskId}-feature.png`;
