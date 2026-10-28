@@ -379,15 +379,20 @@ export function imageTextFromH1(h1, suggested = {}) {
   const head = String(h1 || '').split(/\s*[:|–—]\s*|\s+-\s+/)[0].replace(/\s+/g, ' ').trim();
   const words = (s) => String(s || '').toLowerCase().match(/[a-z0-9.&+]+/g) || [];
   const inHead = new Set(words(head));
-  const s = { line1: suggested.line1 || '', line2: suggested.line2 || '', year: suggested.year || '' };
+  let s = { line1: suggested.line1 || '', line2: suggested.line2 || '', year: suggested.year || '' };
   const fromHead = [s.line1, s.line2, s.year].every((x) => words(x).every((w) => inHead.has(w))) && words(s.line1).length > 0;
-  if (fromHead) return { ...suggested, ...s };
-  const year = (head.match(/\b(20\d\d(?:-\d\d)?)\b/g) || []).pop() || '';
-  const rest = head.replace(year, '').replace(/\s+/g, ' ').trim().split(' ');
-  // Name = a leading acronym ("CGBSE") or the first half; the rest goes on line 2.
-  let cut = /^[A-Z0-9&.-]{2,}$/.test(rest[0]) ? 1 : Math.ceil(rest.length / 2);
-  while (cut > 1 && rest.slice(0, cut).join(' ').length > 26) cut--;
-  return { ...suggested, line1: rest.slice(0, cut).join(' '), line2: rest.slice(cut).join(' '), year };
+  if (!fromHead) {
+    const year = (head.match(/\b(20\d\d(?:-\d\d)?)\b/g) || []).pop() || '';
+    const rest = head.replace(year, '').replace(/\s+/g, ' ').trim().split(' ');
+    // Name = a leading acronym ("CGBSE") or the first half; the rest goes on line 2.
+    let cut = /^[A-Z0-9&.-]{2,}$/.test(rest[0]) ? 1 : Math.ceil(rest.length / 2);
+    while (cut > 1 && rest.slice(0, cut).join(' ').length > 26) cut--;
+    s = { line1: rest.slice(0, cut).join(' '), line2: rest.slice(cut).join(' '), year };
+  }
+  // A one-word topic stays with the name, so the H1 reads as one: "JNTUH Result" / 2026
+  // (two-word topics keep their own stroke: CGBSE / Time Table / 2027).
+  if (s.line2 && !/\s/.test(s.line2.trim()) && `${s.line1} ${s.line2}`.length <= 22) s = { ...s, line1: `${s.line1} ${s.line2.trim()}`, line2: '' };
+  return { ...suggested, ...s };
 }
 
 /**
