@@ -551,11 +551,13 @@ ${plainText($)}`,
   mkdirSync(FIX_DIR, { recursive: true });
   const imageFile = `${st.subTaskId}-feature.png`;
   writeFileSync(`${FIX_DIR}/${imageFile}`, png);
-  changes.push(`Created new feature image, ${how} (alt: "${h1}")`);
+  // Alt text, caption and file name = the words on the image ("CGBSE Time Table 2027"), like the team's own images.
+  const imageAlt = String(h1).split(/\s*[:|–—]\s*|\s+-\s+/)[0].replace(/\s+/g, ' ').trim() || h1;
+  changes.push(`Created new feature image, ${how} (alt text: "${imageAlt}")`);
 
   const after = runChecks({ ...draft, ...fields, html: fields.html ?? draft.html, primaryKeywords: draft.primaryKeywords, heroImage: imageFile, isUpdate, liveUrl }, rules);
   // Nothing is written here; Submit on the dashboard saves these fields and approves.
-  return { changes, fields, imageFile, imageAlt: h1, isUpdate, before, after, at: new Date().toISOString() };
+  return { changes, fields, imageFile, imageAlt, isUpdate, before, after, at: new Date().toISOString() };
 }
 
 const SiloPlan = FixPlan.pick({ h1: true, metaTitle: true, metaDescription: true, ctaText: true });
