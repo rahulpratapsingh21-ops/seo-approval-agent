@@ -6,6 +6,7 @@ import { runAgent, checkSubTask, fixSubTask, submitSubTask, decide, aiStatus } f
 import { FIX_DIR } from './fixer.js';
 import { getSubTask, countSubTasks, countApprovedSince, findSubTasksByNumber, STATUS, TYPES } from './cms.js';
 import { todayIST } from './checks.js';
+import { keyStatus, saveKey, testKey } from './keys.js';
 
 const app = express();
 app.use(express.json());
@@ -158,6 +159,18 @@ app.post('/api/fix/:id', async (req, res) => {
     res.json(fix);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// API keys panel: status only (set + last 4 characters), save, and a free test call.
+app.get('/api/keys', (_, res) => res.json(keyStatus()));
+app.post('/api/keys', (req, res) => {
+  try {
+    const k = saveKey(req.body?.name, req.body?.value);
+    // A new Anthropic key ends a pause caused by the old key's credit/validity.
+    if (k.name === 'ANTHROPIC_API_KEY') Object.assign(aiStatus, { problem: null, kind: null, at: null, pausedUntil: 0 });
+    res.json(k);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/keys/test', async (req, res) => res.json(await testKey(req.body?.name)));
+
 // One task on demand (typed on the dashboard): check, fix, and approve (auto-approve on) or wait for Submit.
 // Works for Ready for SEO review and In SEO review — the CMS lets the SEO manager approve only those.
 const REVIEWABLE = ['readyForSEOReview', 'inSEOReview'];

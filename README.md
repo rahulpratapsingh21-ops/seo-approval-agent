@@ -33,6 +33,9 @@ The fix rewrites the H1 (page display title), meta title and meta description fr
 
 Approval works like the CMS screen: upload image (media + mediaRef) → Start SEO review → Save → Approve by SEO. `DRY_RUN=true` blocks all CMS changes.
 
+## API keys
+The dashboard has an **API keys** panel: `ANTHROPIC_API_KEY` (Claude writes H1, meta, slug, CTA text, link anchors, alt text and image text) and `GEMINI_API_KEY` (optional AI photo backgrounds). Paste, Save (written to `.env`, used at once), Test (free check with the provider). Only this agent uses them; the task creation and writer agents use no AI keys. The browser only ever sees whether a key is set and its last 4 characters.
+
 ## Run locally
 ```
 npm install

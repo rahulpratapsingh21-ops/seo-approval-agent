@@ -14,7 +14,12 @@ const COMPETITORS = /shiksha\.com|collegedunia\.com|careers360\.com|collegedekho
 export const FIX_DIR = fileURLToPath(new URL('../data/fixes', import.meta.url));
 
 // Created on first use so the dashboard still starts when no API key is set yet.
-let client;
+let client, clientKey;
+// A new client when the key changes (keys can be replaced on the dashboard without a restart).
+const claude = () => {
+  if (!client || clientKey !== process.env.ANTHROPIC_API_KEY) { client = new Anthropic(); clientKey = process.env.ANTHROPIC_API_KEY; }
+  return client;
+};
 
 const FixPlan = z.object({
   h1: z.string().describe('Page H1 (the title shown on the page), from the current content: starts with the primary keyword, uses the year the content is about, natural, max 70 characters.'),
@@ -404,7 +409,7 @@ export async function fixBlog(st, draft, before, { isUpdate = false, liveUrl = n
   found.push(...await searchEntityPages(term).catch(() => []));
   const candidates = found.filter((c, i) => !c.url.endsWith(`/${draft.pageUrl}`) && found.findIndex((x) => x.url === c.url) === i);
 
-  client ??= new Anthropic();
+  const client = claude();
   const response = await client.messages.parse({
     model: 'claude-opus-5-5',
     max_tokens: 16000,
@@ -543,7 +548,7 @@ export async function fixSilo(st, draft, before, { isUpdate = false, liveUrl = n
   const title = draft.pageDisplayTitle || draft.entity || st.title;
   const text = cheerio.load(tabHtml(draft, st.page)).root().text().replace(/\s+/g, ' ').trim();
 
-  client ??= new Anthropic();
+  const client = claude();
   const response = await client.messages.parse({
     model: 'claude-opus-5-5',
     max_tokens: 4000,

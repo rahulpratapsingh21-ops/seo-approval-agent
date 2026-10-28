@@ -11,6 +11,13 @@
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
   main { max-width:1320px; margin:0 auto; padding:20px 16px 60px; }
+  .keys { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin-bottom:12px; }
+  .keys summary { cursor:pointer; }
+  .key { border-top:1px solid var(--line); padding:10px 0; display:grid; gap:6px; }
+  .key:first-child { border-top:0; }
+  .key .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .key input { flex:1; min-width:180px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); font-size:14px; }
+  .key small { color:var(--muted); }
   .byid { display:flex; flex-wrap:wrap; gap:10px; align-items:center; background:var(--card); border:1px solid var(--accent); border-radius:10px; padding:12px 14px; margin-bottom:12px; }
   .byid label { display:flex; flex-direction:column; margin-right:4px; } .byid label small { color:var(--muted); font-size:12px; }
   .byid input { width:140px; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); font-size:15px; }
@@ -80,6 +87,12 @@
     <button id="byIdBtn" type="submit">Check, fix &amp; submit</button>
     <span id="byIdMsg" class="muted"></span>
   </form>
+  <details class="keys" id="keysPanel">
+    <summary><b>API keys</b> <span class="muted" id="keysSummary"></span></summary>
+    <div id="keysList"></div>
+    <p class="muted" style="margin:10px 0 0;font-size:13px">Only the SEO Approval Agent uses these keys. The SEO Task Creation Agent and the SYU Writer Agent use no AI keys (only the CMS and Google Sheets/Docs).
+      Keys are saved in this agent's <code>.env</code>; on Render also add them under Environment.</p>
+  </details>
   <div class="controls">
     <button id="pause" class="secondary">Pause auto-check</button>
     <button id="auto" class="secondary">Auto-approve: ON</button>
@@ -279,6 +292,46 @@ async function saveSettings(body) {
   await load();
   return j;
 }
+// API keys: which agent uses each key, set or not (last 4 characters only), save and test.
+async function loadKeys() {
+  const keys = await (await fetch('api/keys')).json();
+  $('keysSummary').textContent = keys.map((k) => `${k.label.split(' ')[0]}: ${k.set ? 'set' : 'not set'}`).join(' · ');
+  $('keysList').innerHTML = keys.map((k) => `<div class="key">
+    <div><b>${esc(k.label)}</b> <span class="pill ${k.set ? 'pass' : 'warn'}">${k.set ? `set ••••${esc(k.last4)}` : 'not set'}</span></div>
+    <small>Used by: ${esc(k.usedFor)}</small>
+    <small>Get one at: ${esc(k.help)}</small>
+    <div class="row">
+      <input type="password" id="key-${k.name}" placeholder="Paste a new ${esc(k.label)}" autocomplete="off">
+      <button class="small" onclick="saveKey('${k.name}')">Save</button>
+      <button class="small secondary" onclick="testKey('${k.name}', this)" ${k.set ? '' : 'disabled'}>Test</button>
+      ${k.set ? `<button class="small secondary danger" onclick="removeKey('${k.name}')">Remove</button>` : ''}
+    </div>
+    <small id="keymsg-${k.name}"></small>
+  </div>`).join('');
+}
+async function postKey(name, value) {
+  const r = await fetch('api/keys', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, value }) });
+  const j = await r.json();
+  if (!r.ok) { $('keymsg-' + name).textContent = j.error; return false; }
+  await loadKeys(); load();
+  return true;
+}
+async function saveKey(name) {
+  const value = $('key-' + name).value.trim();
+  if (!value) { $('keymsg-' + name).textContent = 'Paste the key first.'; return; }
+  if (await postKey(name, value)) { $('keymsg-' + name).textContent = 'Saved — testing…'; testKey(name); }
+}
+async function removeKey(name) {
+  if (confirm('Remove this key from the agent?') && await postKey(name, '')) $('keymsg-' + name).textContent = 'Removed.';
+}
+async function testKey(name, btn) {
+  if (btn) btn.disabled = true;
+  const j = await (await fetch('api/keys/test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) })).json();
+  $('keymsg-' + name).textContent = (j.ok ? '✅ ' : '❌ ') + j.message;
+  if (btn) btn.disabled = false;
+}
+loadKeys();
+
 // Fix a task by ID: check → fix → approve (auto-approve on) or show Submit.
 $('byIdForm').onsubmit = async (e) => {
   e.preventDefault();
