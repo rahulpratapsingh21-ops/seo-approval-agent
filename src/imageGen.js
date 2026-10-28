@@ -1,8 +1,12 @@
 // Photo backgrounds for feature images, made by an image AI. The scene never contains text:
 // the agent adds the title, year, logos and brand itself (image AIs misspell words).
-// Google Gemini (GEMINI_API_KEY) is used when set, otherwise OpenAI (OPENAI_API_KEY).
+// IMAGE_PROVIDER (set from the dashboard) picks one at a time: "gemini", "openai" (ChatGPT) or "off".
 
-export const imageAiReady = () => !!(process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY);
+export const PROVIDERS = { gemini: { name: 'Gemini', key: 'GEMINI_API_KEY' }, openai: { name: 'ChatGPT (OpenAI)', key: 'OPENAI_API_KEY' } };
+const provider = () => process.env.IMAGE_PROVIDER || 'gemini';
+/** True when the chosen image AI has its key. */
+export const imageAiReady = () => !!PROVIDERS[provider()] && !!process.env[PROVIDERS[provider()].key];
+export const imageAiName = () => PROVIDERS[provider()]?.name || 'off';
 
 function prompt(scene) {
   return `Photorealistic 16:9 editorial photo for an Indian education news article. Scene: ${scene}.
@@ -42,7 +46,7 @@ async function openai(scene) {
   return `data:image/png;base64,${b64}`;
 }
 
-/** A photo scene as a data URI. Throws when the image AI fails. */
+/** A photo scene as a data URI from the chosen image AI. Throws when it fails. */
 export async function generateScene(scene) {
-  return process.env.GEMINI_API_KEY ? gemini(scene) : openai(scene);
+  return provider() === 'openai' ? openai(scene) : gemini(scene);
 }

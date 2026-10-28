@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { getEntityImages, searchBlogs, searchEntityPages, tabHtml, newSiloUrl } from './cms.js';
 import { runChecks, ctaOffTopic, ctaTarget, todayIST, isBareCta } from './checks.js';
 import { renderFeatureImage, renderSceneImage, imageDataUri } from './featureImage.js';
-import { imageAiReady, generateScene } from './imageGen.js';
+import { imageAiReady, imageAiName, generateScene } from './imageGen.js';
 
 const CTA_URL = 'https://lp.selectyouruniversity.com/syu-leads-form/';
 const COMPETITORS = /shiksha\.com|collegedunia\.com|careers360\.com|collegedekho\.com|getmyuni\.com|jagranjosh\.com|leverageedu\.com/i;
@@ -511,9 +511,9 @@ ${plainText($)}`,
   if (imageAiReady()) {
     try {
       png = renderSceneImage(plan.featureImage, { scene: await generateScene(plan.featureImage.scene), logo });
-      how = 'AI photo background';
+      how = `AI photo background (${imageAiName()})`;
     } catch (e) {
-      how = ` (AI photo failed: ${e.message.slice(0, 120)})`;
+      how = ` (${imageAiName()} photo failed: ${e.message.slice(0, 120)})`;
     }
   }
   if (!png) {

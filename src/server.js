@@ -17,8 +17,10 @@ const DRY_RUN = process.env.DRY_RUN === 'true';
 const DATA_DIR = fileURLToPath(new URL('../data', import.meta.url));
 const SETTINGS_FILE = `${DATA_DIR}/settings.json`;
 // autoApprove: an update that passes every check is approved during the run, without Submit.
-const settings = { everyMinutes: Number(process.env.RUN_EVERY_MINUTES || 15), paused: false, autoApprove: true };
+// imageProvider: which image AI makes feature-image photos — "gemini", "openai" (ChatGPT) or "off".
+const settings = { everyMinutes: Number(process.env.RUN_EVERY_MINUTES || 15), paused: false, autoApprove: true, imageProvider: 'gemini' };
 try { Object.assign(settings, JSON.parse(readFileSync(SETTINGS_FILE, 'utf8'))); } catch { /* first start */ }
+process.env.IMAGE_PROVIDER = settings.imageProvider; // read by imageGen.js
 const saveSettings = () => { mkdirSync(DATA_DIR, { recursive: true }); writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2)); };
 
 // Every approval made with Submit, for the "Via Submit" count (kept across restarts, last 2,000).
@@ -131,6 +133,7 @@ app.post('/api/settings', (req, res) => {
   const { paused, everyMinutes } = req.body || {};
   if (typeof paused === 'boolean') settings.paused = paused;
   if (typeof req.body?.autoApprove === 'boolean') settings.autoApprove = req.body.autoApprove;
+  if (['gemini', 'openai', 'off'].includes(req.body?.imageProvider)) process.env.IMAGE_PROVIDER = settings.imageProvider = req.body.imageProvider;
   if (everyMinutes !== undefined) {
     const m = Math.round(Number(everyMinutes));
     if (!(m >= 1 && m <= 1440)) return res.status(400).json({ error: 'Minutes must be between 1 and 1440' });

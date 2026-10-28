@@ -13,6 +13,8 @@
   main { max-width:1320px; margin:0 auto; padding:20px 16px 60px; }
   .keys { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin-bottom:12px; }
   .keys summary { cursor:pointer; }
+  .imgai { border:1px solid var(--line); border-radius:8px; margin:10px 0; padding:8px 12px; display:flex; flex-wrap:wrap; gap:6px 18px; align-items:center; }
+  .imgai legend { padding:0 4px; } .imgai small { flex-basis:100%; color:var(--muted); }
   .key { border-top:1px solid var(--line); padding:10px 0; display:grid; gap:6px; }
   .key:first-child { border-top:0; }
   .key .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
@@ -88,7 +90,14 @@
     <span id="byIdMsg" class="muted"></span>
   </form>
   <details class="keys" id="keysPanel">
-    <summary><b>API keys</b> <span class="muted" id="keysSummary"></span></summary>
+    <summary><b>API keys &amp; image AI</b> <span class="muted" id="keysSummary"></span></summary>
+    <fieldset class="imgai">
+      <legend><b>Image AI for feature-image photos</b> — one at a time</legend>
+      <label><input type="radio" name="imgai" value="gemini"> Gemini</label>
+      <label><input type="radio" name="imgai" value="openai"> ChatGPT (OpenAI)</label>
+      <label><input type="radio" name="imgai" value="off"> Off (campus photo / drawn image, no AI cost)</label>
+      <small id="imgAiNote"></small>
+    </fieldset>
     <div id="keysList"></div>
     <p class="muted" style="margin:10px 0 0;font-size:13px">Only the SEO Approval Agent uses these keys. The SEO Task Creation Agent and the SYU Writer Agent use no AI keys (only the CMS and Google Sheets/Docs).
       Keys are saved in this agent's <code>.env</code>; on Render also add them under Environment.</p>
@@ -132,6 +141,7 @@ async function load() {
   $('cfg').textContent = `Checks "${c.pickUp.join(', ')}" ${c.paused ? '· AUTO-CHECK PAUSED' : `every ${c.everyMinutes} min`} → SEO update prepared → ${c.autoApprove ? 'approved automatically when it passes' : 'you click Submit'}${c.dryRun ? ' · DRY RUN (no CMS changes)' : ''}`;
   paused = c.paused;
   autoApprove = c.autoApprove;
+  if (c.imageProvider && c.imageProvider !== imageProvider) { imageProvider = c.imageProvider; showImageAi(); }
   $('pause').textContent = paused ? 'Resume auto-check' : 'Pause auto-check';
   $('auto').textContent = `Auto-approve: ${autoApprove ? 'ON' : 'OFF'}`;
   if (document.activeElement !== $('every')) $('every').value = c.everyMinutes;
@@ -293,8 +303,24 @@ async function saveSettings(body) {
   return j;
 }
 // API keys: which agent uses each key, set or not (last 4 characters only), save and test.
+// Image AI switch: which provider makes the photo (saved in the agent's settings).
+let imageProvider = 'gemini', keysCache = [];
+function showImageAi() {
+  document.querySelectorAll('input[name="imgai"]').forEach((r) => { r.checked = r.value === imageProvider; });
+  const need = { gemini: 'GEMINI_API_KEY', openai: 'OPENAI_API_KEY' }[imageProvider];
+  const k = keysCache.find((x) => x.name === need);
+  $('imgAiNote').textContent = imageProvider === 'off' ? 'No image AI: articles get the campus photo (or the drawn design) in the SYU layout.'
+    : k?.set ? `Using ${imageProvider === 'openai' ? 'ChatGPT (OpenAI)' : 'Gemini'} for new feature images. If it fails, the campus photo / drawn design is used.`
+    : `⚠️ No ${k?.label || 'key'} saved below — until you add it, the campus photo / drawn design is used.`;
+}
+document.querySelectorAll('input[name="imgai"]').forEach((r) => r.addEventListener('change', async () => {
+  const j = await saveSettings({ imageProvider: r.value });
+  if (j) { imageProvider = j.imageProvider; showImageAi(); flash(`Image AI: ${r.parentElement.textContent.trim()}`); }
+}));
+
 async function loadKeys() {
-  const keys = await (await fetch('api/keys')).json();
+  const keys = keysCache = await (await fetch('api/keys')).json();
+  showImageAi();
   $('keysSummary').textContent = keys.map((k) => `${k.label.split(' ')[0]}: ${k.set ? 'set' : 'not set'}`).join(' · ');
   $('keysList').innerHTML = keys.map((k) => `<div class="key">
     <div><b>${esc(k.label)}</b> <span class="pill ${k.set ? 'pass' : 'warn'}">${k.set ? `set ••••${esc(k.last4)}` : 'not set'}</span></div>

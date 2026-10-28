@@ -16,8 +16,14 @@ export const KEYS = [
   {
     name: 'GEMINI_API_KEY',
     label: 'Google Gemini API key',
-    usedFor: 'SEO Approval Agent — AI photo backgrounds for feature images. Optional: without it the campus photo or the drawn design is used.',
+    usedFor: 'SEO Approval Agent — AI photo backgrounds for feature images, when "Gemini" is chosen as the image AI. Needs billing on in Google AI Studio.',
     help: 'aistudio.google.com/apikey',
+  },
+  {
+    name: 'OPENAI_API_KEY',
+    label: 'OpenAI (ChatGPT) API key',
+    usedFor: 'SEO Approval Agent — AI photo backgrounds for feature images, when "ChatGPT" is chosen as the image AI. Needs credit on platform.openai.com.',
+    help: 'platform.openai.com/api-keys',
   },
 ];
 
@@ -57,6 +63,11 @@ export async function testKey(name) {
       const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { headers: { 'x-goog-api-key': v } });
       const j = await r.json().catch(() => ({}));
       return r.ok ? { ok: true, message: 'Key works (image billing must be on in Google AI Studio)' } : { ok: false, message: j.error?.message || `HTTP ${r.status}` };
+    }
+    if (name === 'OPENAI_API_KEY') {
+      const r = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${v}` } });
+      const j = await r.json().catch(() => ({}));
+      return r.ok ? { ok: true, message: 'Key works (credit balance is not shown by this check)' } : { ok: false, message: j.error?.message || `HTTP ${r.status}` };
     }
     return { ok: false, message: 'Unknown key' };
   } catch (e) {
