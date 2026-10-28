@@ -117,9 +117,10 @@ export async function imageDataUri(url, { format = 'png', width = 300, trim = fa
  * the right and the SYU brand top right. All text is drawn here, never by the image AI.
  * text: { line1: "CGBSE", line2: "Time Table", year: "2027" }; images: { scene (required), logo } as data URIs.
  */
-export function renderSceneImage({ line1, line2 = '', year = '' }, { scene, logo = null, logoBox = 160 }) {
-  const cx = logo ? 500 : 600;
-  const maxW = logo ? 700 : 900;
+export function renderSceneImage({ line1, line2 = '', year = '' }, { scene, logo = null, logoBox = 160, personLeft = false }) {
+  // personLeft: AI photos keep the person in the left third, so the title moves right to leave their face clear.
+  const cx = personLeft ? (logo ? 640 : 720) : logo ? 500 : 600;
+  const maxW = personLeft ? (logo ? 560 : 760) : logo ? 700 : 900;
   // Compact title so the photo stays visible: line1 on navy (one line; wrapped only when very long),
   // line2 on yellow, year on pink. Max 3 strokes; text shrinks to fit the width.
   const title = line1.length > 26 ? wrap(line1, 20) : [line1];

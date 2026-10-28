@@ -11,8 +11,9 @@ export const imageAiName = () => PROVIDERS[provider()]?.name || 'off';
 function prompt(scene) {
   return `Photorealistic 16:9 editorial photo for an Indian education news article. Scene: ${scene}.
 Bright natural daylight, sharp focus, warm and positive mood, clean modern look, high detail.
-Composition: keep the upper middle of the picture calm and softly out of focus (a large headline will be placed there),
-and keep the right third uncluttered (a round logo goes there).
+Composition (important): any person sits in the LEFT third of the frame, never in the middle; the centre and the right
+two thirds of the upper half are open and calm (plain wall, window light or sky, softly out of focus) because a large
+headline goes in the centre-right and a round logo on the far right. Desk objects may sit along the bottom edge.
 Absolutely no text, letters, numbers, signs, logos, labels or watermarks anywhere in the image.`;
 }
 
@@ -37,7 +38,7 @@ async function openai(scene) {
   const r = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: { 'content-type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-    body: JSON.stringify({ model: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1', prompt: prompt(scene), size: '1536x1024', quality: 'medium', n: 1 }),
+    body: JSON.stringify({ model: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2', prompt: prompt(scene), size: '1536x1024', quality: 'medium', n: 1 }),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`OpenAI image: ${j.error?.message || r.status}`);

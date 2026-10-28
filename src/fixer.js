@@ -510,7 +510,7 @@ ${plainText($)}`,
   let png = null, how = '';
   if (imageAiReady()) {
     try {
-      png = renderSceneImage(plan.featureImage, { scene: await generateScene(plan.featureImage.scene), logo });
+      png = renderSceneImage(plan.featureImage, { scene: await generateScene(plan.featureImage.scene), logo, personLeft: true });
       how = `AI photo background (${imageAiName()})`;
     } catch (e) {
       how = ` (${imageAiName()} photo failed: ${e.message.slice(0, 120)})`;
