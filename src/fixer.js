@@ -21,6 +21,40 @@ const claude = () => {
   return client;
 };
 
+/**
+ * Ask the chosen text AI for a structured answer: Claude (Anthropic) or ChatGPT (OpenAI), switched on the
+ * dashboard (TEXT_PROVIDER). Returns the parsed object; API errors keep their status for aiProblem().
+ */
+async function askAI({ system, user, schema, maxTokens }) {
+  if (process.env.TEXT_PROVIDER !== 'openai') {
+    const response = await claude().messages.parse({
+      model: 'claude-opus-5-5',
+      max_tokens: maxTokens,
+      output_config: { effort: 'medium', format: zodOutputFormat(schema) },
+      system,
+      messages: [{ role: 'user', content: user }],
+    });
+    if (response.stop_reason === 'refusal' || !response.parsed_output) throw new Error(`Claude could not produce a fix (${response.stop_reason})`);
+    return response.parsed_output;
+  }
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+    body: JSON.stringify({
+      model: process.env.OPENAI_TEXT_MODEL || 'gpt-5.5',
+      reasoning_effort: 'medium',
+      max_completion_tokens: maxTokens + 8000, // reasoning tokens count too
+      response_format: { type: 'json_schema', json_schema: { name: 'fix', schema: z.toJSONSchema(schema) } },
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+    }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(`OpenAI: ${j.error?.code || ''} ${j.error?.message || r.status}`), { status: r.status });
+  const content = j.choices?.[0]?.message?.content;
+  if (!content) throw new Error(`ChatGPT could not produce a fix (${j.choices?.[0]?.finish_reason || 'empty answer'})`);
+  return schema.parse(JSON.parse(content));
+}
+
 const FixPlan = z.object({
   h1: z.string().describe('Page H1 (the title shown on the page), from the current content: starts with the primary keyword, uses the year the content is about, natural, max 70 characters.'),
   metaTitle: z.string().describe('50–60 characters, contains the primary keyword near the start.'),
@@ -434,15 +468,11 @@ export async function fixBlog(st, draft, before, { isUpdate = false, liveUrl = n
   found.push(...await searchEntityPages(term).catch(() => []));
   const candidates = found.filter((c, i) => !c.url.endsWith(`/${draft.pageUrl}`) && found.findIndex((x) => x.url === c.url) === i);
 
-  const client = claude();
-  const response = await client.messages.parse({
-    model: 'claude-opus-5-5',
-    max_tokens: 16000,
-    output_config: { effort: 'medium', format: zodOutputFormat(FixPlan) },
+  const plan = await askAI({
+    schema: FixPlan,
+    maxTokens: 16000,
     system: SYSTEM,
-    messages: [{
-      role: 'user',
-      content: `Fix this blog draft.
+    user: `Fix this blog draft.
 ${isUpdate ? `This is an UPDATE of a live page${liveUrl ? ` (${liveUrl})` : ''}: the URL stays as it is, return the current slug unchanged.` : 'This is a NEW page.'}
 
 Primary keyword: ${primary}
@@ -462,10 +492,7 @@ ${needAlt.map((i) => `- index ${i.index}: ${i.src} (text before it: "${i.near}")
 
 Article text:
 ${plainText($)}`,
-    }],
   });
-  if (response.stop_reason === 'refusal' || !response.parsed_output) throw new Error(`Claude could not produce a fix (${response.stop_reason})`);
-  const plan = response.parsed_output;
 
   // 3. Internal links, only when the article has fewer than LINK_TARGET: first where another published
   //    blog's keyword appears word-for-word, then Claude's anchors (one per page, never on this
@@ -577,15 +604,11 @@ export async function fixSilo(st, draft, before, { isUpdate = false, liveUrl = n
   const title = draft.pageDisplayTitle || draft.entity || st.title;
   const text = cheerio.load(tabHtml(draft, st.page)).root().text().replace(/\s+/g, ' ').trim();
 
-  const client = claude();
-  const response = await client.messages.parse({
-    model: 'claude-opus-5-5',
-    max_tokens: 4000,
-    output_config: { effort: 'medium', format: zodOutputFormat(SiloPlan) },
+  const plan = await askAI({
+    schema: SiloPlan,
+    maxTokens: 4000,
     system: SYSTEM,
-    messages: [{
-      role: 'user',
-      content: `Write the H1, meta title, meta description and CTA line for this ${st.contentCategory.replace(/s$/, '')} page ("${tabKey}" section of ${draft.entity}).
+    user: `Write the H1, meta title, meta description and CTA line for this ${st.contentCategory.replace(/s$/, '')} page ("${tabKey}" section of ${draft.entity}).
 Base them on the content below; use years and facts exactly as the content has them.
 
 Primary keyword: ${primary}
@@ -598,10 +621,7 @@ ${before.checks.filter((c) => c.level !== 'pass').map((c) => `- ${c.label}: ${c.
 
 Page content:
 ${text.slice(0, 40000)}`,
-    }],
   });
-  if (response.stop_reason === 'refusal' || !response.parsed_output) throw new Error(`Claude could not produce a fix (${response.stop_reason})`);
-  const plan = response.parsed_output;
 
   // Visible sections of this silo, in page order (same walk as tabHtml).
   const sections = [];

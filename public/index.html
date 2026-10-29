@@ -92,6 +92,12 @@
   <details class="keys" id="keysPanel">
     <summary><b>API keys &amp; image AI</b> <span class="muted" id="keysSummary"></span></summary>
     <fieldset class="imgai">
+      <legend><b>Text AI</b> (H1, meta, CTA, links, alt text)</legend>
+      <label><input type="radio" name="textai" value="claude"> Claude (Anthropic)</label>
+      <label><input type="radio" name="textai" value="openai"> ChatGPT (OpenAI)</label>
+      <small id="textAiNote"></small>
+    </fieldset>
+    <fieldset class="imgai">
       <legend><b>Image AI for feature-image photos</b> — one at a time</legend>
       <label><input type="radio" name="imgai" value="gemini"> Gemini</label>
       <label><input type="radio" name="imgai" value="openai"> ChatGPT (OpenAI)</label>
@@ -142,6 +148,7 @@ async function load() {
   paused = c.paused;
   autoApprove = c.autoApprove;
   if (c.imageProvider && c.imageProvider !== imageProvider) { imageProvider = c.imageProvider; showImageAi(); }
+  if (c.textProvider && c.textProvider !== textProvider) { textProvider = c.textProvider; showTextAi(); }
   $('pause').textContent = paused ? 'Resume auto-check' : 'Pause auto-check';
   $('auto').textContent = `Auto-approve: ${autoApprove ? 'ON' : 'OFF'}`;
   if (document.activeElement !== $('every')) $('every').value = c.everyMinutes;
@@ -313,6 +320,18 @@ function showImageAi() {
     : k?.set ? `Using ${imageProvider === 'openai' ? 'ChatGPT (OpenAI)' : 'Gemini'} for new feature images. If it fails, the campus photo / drawn design is used.`
     : `⚠️ No ${k?.label || 'key'} saved below — until you add it, the campus photo / drawn design is used.`;
 }
+// Text AI switch: which AI writes the SEO fixes (one at a time).
+let textProvider = 'claude';
+function showTextAi() {
+  document.querySelectorAll('input[name="textai"]').forEach((r) => { r.checked = r.value === textProvider; });
+  const k = keysCache.find((x) => x.name === (textProvider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY'));
+  $('textAiNote').textContent = k && !k.set ? `⚠️ No ${k.label || 'key'} saved below — add it to use this AI.`
+    : `Using ${textProvider === 'openai' ? 'ChatGPT (OpenAI, gpt-5.5) — needs credit on platform.openai.com' : 'Claude (Anthropic) — needs credit on console.anthropic.com'} for SEO fixes.`;
+}
+document.querySelectorAll('input[name="textai"]').forEach((r) => r.addEventListener('change', async () => {
+  const j = await saveSettings({ textProvider: r.value });
+  if (j) { textProvider = j.textProvider; showTextAi(); flash(`Text AI: ${r.parentElement.textContent.trim()}`); }
+}));
 document.querySelectorAll('input[name="imgai"]').forEach((r) => r.addEventListener('change', async () => {
   const j = await saveSettings({ imageProvider: r.value });
   if (j) { imageProvider = j.imageProvider; showImageAi(); flash(`Image AI: ${r.parentElement.textContent.trim()}`); }
@@ -320,7 +339,7 @@ document.querySelectorAll('input[name="imgai"]').forEach((r) => r.addEventListen
 
 async function loadKeys() {
   const keys = keysCache = await (await fetch('api/keys')).json();
-  showImageAi();
+  showImageAi(); showTextAi();
   $('keysSummary').textContent = keys.map((k) => `${k.label.split(' ')[0]}: ${k.set ? 'set' : 'not set'}`).join(' · ');
   $('keysList').innerHTML = keys.map((k) => `<div class="key">
     <div><b>${esc(k.label)}</b> <span class="pill ${k.set ? 'pass' : 'warn'}">${k.set ? `set ••••${esc(k.last4)}` : 'not set'}</span></div>

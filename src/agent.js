@@ -58,6 +58,15 @@ export function getFix(subTaskId) {
 export const aiStatus = { problem: null, kind: null, at: null, pausedUntil: 0 };
 function aiProblem(e) {
   const text = `${e?.status || ''} ${e?.message || ''}`;
+  if (process.env.TEXT_PROVIDER === 'openai') {
+    if (/insufficient_quota|billing|exceeded your current quota/i.test(text))
+      return { kind: 'credit', pause: true, problem: 'OpenAI (ChatGPT) credit has run out. AI fixes are paused — add credit at platform.openai.com → Settings → Billing, or switch Text AI to Claude, then click "Fix again".' };
+    if (e?.status === 401 || /invalid_api_key|incorrect api key/i.test(text))
+      return { kind: 'key', pause: true, problem: 'OpenAI API key is not valid. Update OPENAI_API_KEY in the API keys panel, then click "Fix again".' };
+    if (e?.status === 429) return { kind: 'rate', pause: false, problem: 'OpenAI rate limit reached — fixes will continue on the next check.' };
+    if (e?.status >= 500) return { kind: 'busy', pause: false, problem: 'OpenAI is busy right now — fixes will continue on the next check.' };
+    return null;
+  }
   if (/credit balance is too low|billing|insufficient.*credit/i.test(text))
     return { kind: 'credit', pause: true, problem: 'Anthropic credit has run out. AI fixes are paused — add credit at console.anthropic.com → Settings → Billing, then click "Fix again".' };
   if (e?.status === 401 || /authentication_error|invalid x-api-key/i.test(text))
@@ -70,7 +79,9 @@ function aiProblem(e) {
 }
 
 export async function fixSubTask(st, { force = false } = {}) {
-  if (!process.env.ANTHROPIC_API_KEY) return { error: 'Add ANTHROPIC_API_KEY to .env to enable auto-fix' };
+  // The text AI chosen on the dashboard needs its key.
+  const keyName = process.env.TEXT_PROVIDER === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY';
+  if (!process.env[keyName]) return { error: `Add ${keyName} in the API keys panel to enable auto-fix` };
   const draft = await getDraft(st);
   if (!draft) return null;
   const old = getFix(st.subTaskId);
