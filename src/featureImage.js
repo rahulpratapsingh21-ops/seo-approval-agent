@@ -178,11 +178,12 @@ export function renderSceneImage({ line1, line2 = '', year = '' }, { scene, pers
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.3"/></filter>
   </defs>
   <image href="${scene}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
+  <!-- SYU brand without a box (transparent, like the sample): white letters with a navy outline read on any photo. -->
   <g filter="url(#shadow)">
-    <rect x="890" y="24" width="286" height="84" rx="16" fill="#ffffff"/>
-    <image href="${SYU_ICON}" x="904" y="34" width="64" height="64"/>
-    <text x="978" y="72" font-family="Poppins" font-weight="800" font-size="38" fill="${NAVY}">SELECT</text>
-    <text x="980" y="96" font-family="Poppins" font-weight="700" font-size="16" fill="${PINK}">YOUR UNIVERSITY</text>
+    <circle cx="936" cy="62" r="30" fill="${PINK}" stroke="#ffffff" stroke-width="4"/>
+    <path d="M921 62 L932 73 L952 50" fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="978" y="70" font-family="Poppins" font-weight="800" font-size="38" fill="#ffffff" stroke="${NAVY}" stroke-width="5" paint-order="stroke">SELECT</text>
+    <text x="980" y="94" font-family="Poppins" font-weight="700" font-size="16" fill="#ffffff" stroke="${NAVY}" stroke-width="4" paint-order="stroke">YOUR UNIVERSITY</text>
   </g>
   <g transform="rotate(-2 ${cx} 350)">
     <g filter="url(#shadow)">${brush(cx, 350, blobW, total + 70, NAVY, 5)}</g>
