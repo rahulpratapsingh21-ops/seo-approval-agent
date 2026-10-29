@@ -45,7 +45,7 @@ export async function checkAll() {
 
 // One fix per saved draft version, so a draft is only sent to Claude again after the writer changes it.
 // FIX_VERSION goes up when the fix rules change, so older saved fixes are made again.
-const FIX_VERSION = 12;
+const FIX_VERSION = 14;
 const fixPath = (id) => `${FIX_DIR}/${id}.json`;
 export function getFix(subTaskId) {
   try { return JSON.parse(readFileSync(fixPath(subTaskId), 'utf8')); } catch { return null; }
@@ -109,14 +109,16 @@ export async function fixSubTask(st, { force = false } = {}) {
 
 /**
  * Every task gets its SEO update prepared (meta, image, links, CTAs — see fixer.js) from the current content.
- * With auto-approve on, an update that passes every check is saved in the CMS and approved right away;
+ * With auto-approve on, an update that passes every check is saved in the CMS and approved 5 seconds later;
  * otherwise (or when it still fails a check) it waits for Submit on the dashboard.
  */
+const AUTO_APPROVE_WAIT_MS = 5000; // pause between "fix ready" and the automatic approval
 export async function decide(st, { dryRun = false, autoApprove = false } = {}) {
   const item = await checkSubTask(st);
   const fix = await fixSubTask(st);
   const ready = fix?.after?.status === 'pass';
   if (ready && autoApprove && !dryRun && !fix.submittedAt) {
+    await new Promise((r) => setTimeout(r, AUTO_APPROVE_WAIT_MS));
     try {
       await submitSubTask(st);
       return { ...item, fix: getFix(st.subTaskId), action: 'fixed & approved', auto: true };

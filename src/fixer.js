@@ -59,7 +59,7 @@ const FixPlan = z.object({
   h1: z.string().describe('Page H1 (the title shown on the page), from the current content: starts with the primary keyword, uses the year the content is about, natural, max 70 characters.'),
   metaTitle: z.string().describe('50–60 characters, contains the primary keyword near the start.'),
   metaDescription: z.string().describe('130–155 characters, contains the primary keyword, ends with a reason to click.'),
-  slug: z.string().describe('lowercase-hyphenated URL slug with the main keyword, max 60 chars, no dates unless essential.'),
+  slug: z.string().describe('Short lowercase-hyphenated URL slug: the main keyword only, no year, month, date or small words, e.g. "fmge-exam-day-guidelines" for "FMGE Exam 2026 on October 31 Exam Day Guidelines". Max 60 chars.'),
   ctaText: z.string().describe('Short CTA line about this article\'s topic, 35–55 characters, e.g. "Get FREE Expert Guidance for PTU Results 2026". No emoji.'),
   internalLinks: z.array(z.object({
     anchorText: z.string().describe('Keyword phrase copied word-for-word from the article text (1–6 words) that names the target page\'s topic, e.g. "GSEB HSC exam" or "IKGPTU".'),
@@ -103,6 +103,17 @@ function keyPhrases(keywords) {
     }
   }
   return [...out];
+}
+
+// URL slug: short and evergreen — no years, months, dates or small words.
+// "fmge-2026-october-31-exam-day-guidelines" → "fmge-exam-day-guidelines"; "class 12" / "round 2" keep their number.
+const MONTHS = /^(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|sep(t|tember)?|oct(ober)?|nov(ember)?|dec(ember)?)$/;
+const SLUG_STOP = new Set(['on', 'the', 'of', 'for', 'in', 'at', 'to', 'and', 'a', 'an', 'is', 'by', 'with', 'from', 'out', 'check', 'here', 'now', 'today', 'latest']);
+export function cleanSlug(slug) {
+  const words = String(slug).toLowerCase().replace(/[^a-z0-9]+/g, '-').split('-').filter(Boolean);
+  const keep = words.filter((w, i) => !/^(19|20)\d\d$/.test(w) && !MONTHS.test(w) && !SLUG_STOP.has(w)
+    && !(/^\d{1,2}(st|nd|rd|th)?$/.test(w) && !/^(class|round|phase|part|paper|semester|sem|grade|std|term)$/.test(words[i - 1] || '') && !/^(year|yr|semester|sem|round|phase)$/.test(words[i + 1] || '')));
+  return [...new Set(keep)].join('-').slice(0, 60).replace(/-+$/, '');
 }
 
 const CTA_MAX = 60;
@@ -501,19 +512,44 @@ ${plainText($)}`,
   const linked = new Set($('a').map((_, a) => $(a).attr('href')).get());
   const existing = $('a').filter((_, a) => /^\/(?!\/)|selectyouruniversity\.com/i.test($(a).attr('href') || '') && !isCtaBox($, a)).length;
   const room = Math.max(0, LINK_TARGET - existing);
-  const pairs = candidates.flatMap((c) => keyPhrases(c.keywords).map((k) => ({ k, url: c.url })))
-    .filter(({ k }) => !norm(primary).includes(norm(k)) && !norm(k).includes(norm(primary)))
-    .sort((a, b) => b.k.length - a.k.length);
+  // An exam / college / course name links to its own page, never to a blog that happens to have the
+  // name as a keyword ("Foreign Medical Graduate Examination" → /exam/fmge-…, not an FMGE blog).
+  const isEntityPage = (url) => /\/(exam|college|course)\//.test(url);
+  const byLength = (a, b) => b.k.length - a.k.length;
+  const phrasesOf = (list) => list.flatMap((c) => keyPhrases(c.keywords).map((k) => ({ k, url: c.url })))
+    .filter(({ k }) => !norm(primary).includes(norm(k)) && !norm(k).includes(norm(primary)));
+  const entityPairs = phrasesOf(candidates.filter((c) => isEntityPage(c.url))).sort(byLength);
+  // Names compared without plural s: the CMS says "Foreign Medical Graduates Examination", articles "Graduate".
+  const nameKey = (t) => norm(t).replace(/s\b/g, '');
+  const entityNames = new Set(entityPairs.map(({ k }) => nameKey(k)));
+  const blogPairs = phrasesOf(candidates.filter((c) => !isEntityPage(c.url))).filter(({ k }) => !entityNames.has(nameKey(k))).sort(byLength);
+  const pairs = [...entityPairs, ...blogPairs];
+  // Repair links already in the article: an exam/college/course name that points to a blog is moved to
+  // the name's own page; a later link with the same name to that page then becomes plain text (one link).
+  const entityUrl = new Map(entityPairs.map(({ k, url }) => [nameKey(k), url]));
+  const repaired = [];
+  $('a').each((_, a) => {
+    const href = $(a).attr('href') || '', target = entityUrl.get(nameKey($(a).text()));
+    if (!target || href === target || isEntityPage(href) || isCtaBox($, a) || !/selectyouruniversity\.com\/blog\/|^\/blog\//.test(href)) return;
+    $(a).attr('href', target); linked.add(target); repaired.push(a);
+    changes.push(`Internal link "${$(a).text().trim()}" moved to its own page: ${href} → ${target}`);
+  });
+  for (const a of repaired) {
+    $(`a[href="${$(a).attr('href')}"]`).toArray().filter((x) => x !== a && norm($(x).text()) === norm($(a).text()) && !isCtaBox($, x))
+      .forEach((x) => $(x).replaceWith($(x).html()));
+  }
   // Then Claude's keyword anchors — only kept when the phrase is really in the article text.
   // Website addresses ("cgbse.nic.in") are never anchors for our own pages.
   const suggested = plan.internalLinks.filter((l) => candidates.some((c) => c.url === l.url) && norm(l.anchorText) !== norm(primary)
     && !/^https?:|\b[\w-]+\.(com|in|org|net|gov|nic|edu|ac)\b/i.test(l.anchorText))
     .map((l) => ({ k: l.anchorText, url: l.url }));
   let added = 0;
+  const usedAnchors = new Set(); // the same words never link to two pages
   for (const { k, url } of [...pairs, ...suggested]) {
-    if (added >= room || linked.has(url)) continue;
+    if (added >= room || linked.has(url) || usedAnchors.has(norm(k))) continue;
+    if (!isEntityPage(url) && entityNames.has(nameKey(k))) continue; // the name belongs to the exam/college page
     const text = addLink($, k, url);
-    if (text) { linked.add(url); added++; changes.push(`Added internal link "${text}" → ${url}`); }
+    if (text) { linked.add(url); usedAnchors.add(norm(k)); added++; changes.push(`Added internal link "${text}" → ${url}`); }
   }
   //    Still under LINK_MIN: "👉 Also Read: <related title>" lines before later sections (article text untouched).
   const extra = candidates.filter((c) => !linked.has(c.url) && c.title).slice(0, Math.max(0, LINK_MIN - existing - added));
@@ -545,7 +581,7 @@ ${plainText($)}`,
   setField('title', 'H1', plan.h1);
   setField('metaTitle', 'Meta title', plan.metaTitle);
   setField('metaDescription', 'Meta description', plan.metaDescription);
-  if (!isUpdate) setField('pageUrl', 'URL', plan.slug.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, ''));
+  if (!isUpdate) setField('pageUrl', 'URL', cleanSlug(plan.slug));
   const h1 = fields.title || draft.title;
   if (before.checks.some((c) => c.id === 'date' && c.level !== 'pass')) {
     fields.date = new Date(`${todayIST()}T00:00:00+05:30`).toISOString();

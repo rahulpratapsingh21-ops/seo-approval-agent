@@ -144,7 +144,7 @@ const actionPill = (a) => `<span class="pill ${/^(fixed & approved|ready to subm
 async function load() {
   const s = await (await fetch('api/state')).json();
   const c = s.config;
-  $('cfg').textContent = `Checks "${c.pickUp.join(', ')}" ${c.paused ? '· AUTO-CHECK PAUSED' : `every ${c.everyMinutes} min`} → SEO update prepared → ${c.autoApprove ? 'approved automatically when it passes' : 'you click Submit'}${c.dryRun ? ' · DRY RUN (no CMS changes)' : ''}`;
+  $('cfg').textContent = `Checks "${c.pickUp.join(', ')}" ${c.paused ? '· AUTO-CHECK PAUSED' : `every ${c.everyMinutes} min`} → SEO update prepared → ${c.autoApprove ? 'approved automatically 5 seconds after it passes' : 'you click Submit'}${c.dryRun ? ' · DRY RUN (no CMS changes)' : ''}`;
   paused = c.paused;
   autoApprove = c.autoApprove;
   if (c.imageProvider && c.imageProvider !== imageProvider) { imageProvider = c.imageProvider; showImageAi(); }
@@ -398,7 +398,7 @@ let autoApprove = true;
 $('auto').onclick = async () => {
   if (!autoApprove || confirm('Turn off auto-approve? Updates will then wait for you to click Submit.')) {
     const j = await saveSettings({ autoApprove: !autoApprove });
-    if (j) flash(j.autoApprove ? 'Auto-approve on: passing updates are approved during each run.' : 'Auto-approve off: click Submit to approve.');
+    if (j) flash(j.autoApprove ? 'Auto-approve on: a passing update is approved 5 seconds after its fix is ready.' : 'Auto-approve off: click Submit to approve.');
   }
 };
 $('pause').onclick = async () => { const j = await saveSettings({ paused: !paused }); if (j) flash(j.paused ? 'Auto-check paused. Run now still works.' : 'Auto-check resumed.'); };
