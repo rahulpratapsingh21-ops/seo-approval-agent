@@ -111,56 +111,84 @@ export async function imageDataUri(url, { format = 'png', width = 300, trim = fa
   } catch { return null; }
 }
 
+/** Split words into `n` rows of balanced length (in order). */
+function rowsOf(words, n) {
+  if (words.length <= n) return words.map((w) => [w]);
+  let best = null, bestScore = Infinity;
+  const go = (from, left, acc) => {
+    if (left === 1) {
+      const all = [...acc, words.slice(from)];
+      const lens = all.map((r) => r.join(' ').length);
+      const score = Math.max(...lens) - Math.min(...lens);
+      if (score < bestScore) { bestScore = score; best = all; }
+      return;
+    }
+    for (let i = from + 1; i <= words.length - left + 1; i++) go(i, left - 1, [...acc, words.slice(from, i)]);
+  };
+  go(0, n, []);
+  return best;
+}
+
+/** Sun rays (short yellow strokes) fanning out from a point, pointing left (dir -1) or right (dir 1). */
+function rays(x, y, dir) {
+  return [-34, -12, 12, 34].map((deg, i) => {
+    const a = (deg * Math.PI) / 180, len = i === 1 || i === 2 ? 46 : 34;
+    const x1 = x + dir * 14 * Math.cos(a), y1 = y + 14 * Math.sin(a);
+    const x2 = x + dir * (14 + len) * Math.cos(a), y2 = y + (14 + len) * Math.sin(a);
+    return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${YELLOW}" stroke-width="9" stroke-linecap="round"/>`;
+  }).join('');
+}
+
 /**
- * Feature image on an AI photo scene, laid out like the SYU sample: big stacked title — line1 on a
- * navy brush stroke, line2 on yellow, the year on pink — the board/college logo in a white circle on
- * the right and the SYU brand top right. All text is drawn here, never by the image AI.
- * text: { line1: "CGBSE", line2: "Time Table", year: "2027" }; images: { scene (required), logo } as data URIs.
+ * Feature image on an AI photo scene, laid out like the SYU sample: the person on the left, one big navy
+ * brush shape in the centre with the title in large UPPERCASE — white rows, the middle row yellow on a red
+ * band — yellow rays on both sides, and the SYU brand top right. All text is drawn here, never by the image AI.
+ * text: { line1: "Madras University", line2: "Result", year: "2026" }; images: { scene (required) } as data URIs.
+ * ("Madras University Result 2026" → MADRAS / UNIVERSITY / RESULT 2026.)
  */
-export function renderSceneImage({ line1, line2 = '', year = '' }, { scene, logo = null, logoBox = 160, personLeft = false }) {
-  // personLeft: AI photos keep the person in the left third, so the title moves right to leave their face clear.
-  const cx = personLeft ? (logo ? 640 : 720) : logo ? 500 : 600;
-  const maxW = personLeft ? (logo ? 560 : 760) : logo ? 700 : 900;
-  // Compact title so the photo stays visible: line1 on navy (one line; wrapped only when very long),
-  // line2 on yellow, year on pink. Max 3 strokes; text shrinks to fit the width.
-  const title = line1.length > 26 ? wrap(line1, 20) : [line1];
-  const rows = [
-    ...title.map((t) => ({ t, fill: NAVY, color: '#ffffff', max: title.length > 1 ? 70 : 88 })),
-    ...(line2 ? [{ t: line2, fill: YELLOW, color: NAVY, max: 72 }] : []),
-    ...(year && title.length < 2 ? [{ t: year, fill: PINK, color: '#ffffff', max: 84 }] : []),
-  ].map((r) => ({ ...r, size: fit(r.t, maxW - 90, r.max) }));
-  // A long title takes two navy lines, so the year joins the yellow line instead of its own stroke.
-  if (year && title.length > 1) {
-    const y2 = rows.find((r) => r.fill === YELLOW);
-    if (y2) { y2.t = `${y2.t} ${year}`; y2.size = fit(y2.t, maxW - 90, 72); } else rows.push({ t: year, fill: PINK, color: '#ffffff', size: fit(year, maxW - 90, 84) });
-  }
-  const gap = 12;
-  const heights = rows.map((r) => r.size * 1.3);
-  let y = 330 - (heights.reduce((a, b) => a + b, 0) + gap * (rows.length - 1)) / 2;
-  const strokes = rows.map((r, i) => {
+export function renderSceneImage({ line1, line2 = '', year = '' }, { scene, personLeft = false }) {
+  const cx = personLeft ? 690 : 600, maxW = personLeft ? 640 : 820;
+  // Words of the title once each ("FMGE Exam" + "Exam Day Guidelines" → FMGE EXAM DAY GUIDELINES), then the year.
+  const words = [];
+  for (const w of `${line1} ${line2}`.toUpperCase().split(/\s+/).filter(Boolean)) if (!words.includes(w)) words.push(w);
+  if (year && !words.includes(year)) words.push(year);
+  const n = words.length >= 3 ? 3 : words.length;
+  const rows = rowsOf(words, n).map((r) => r.join(' '));
+  const mid = rows.length === 3 ? 1 : rows.length - 1; // the highlighted row
+  const sizes = rows.map((t, i) => fit(t, maxW - 70, i === mid ? 96 : 112));
+  const gap = 6;
+  const heights = sizes.map((z) => z * 1.12);
+  const total = heights.reduce((a, b) => a + b, 0) + gap * (rows.length - 1);
+  const top = 350 - total / 2;
+  const blobW = Math.min(maxW + 60, Math.max(...rows.map((t, i) => textW(t, sizes[i]))) + 120);
+  let y = top;
+  const text = rows.map((t, i) => {
     const cy = y + heights[i] / 2;
     y += heights[i] + gap;
-    return `<g filter="url(#shadow)">${brush(cx, cy, textW(r.t, r.size) + 90, heights[i], r.fill, 7 + i * 4)}</g>
-    <text x="${cx}" y="${cy + r.size * 0.36}" text-anchor="middle" font-family="Poppins" font-weight="800" font-size="${r.size}" fill="${r.color}">${esc(r.t)}</text>`;
+    const tw = textW(t, sizes[i]);
+    const band = i === mid ? `<g filter="url(#shadow)">${brush(cx, cy, tw + 60, heights[i] * 1.02, RED, 13)}</g>` : '';
+    const color = i === mid ? YELLOW : '#ffffff';
+    return `${band}<text x="${cx}" y="${cy + sizes[i] * 0.36}" text-anchor="middle" font-family="Poppins" font-weight="800" font-size="${sizes[i]}"
+      fill="${color}" stroke="${NAVY}" stroke-width="${Math.round(sizes[i] / 14)}" paint-order="stroke" letter-spacing="1">${esc(t)}</text>`;
   }).join('');
+  const midY = top + heights.slice(0, mid).reduce((a, b) => a + b + gap, 0) + heights[mid] / 2;
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
-    <clipPath id="logoClip"><circle cx="1040" cy="300" r="110"/></clipPath>
-    <radialGradient id="glow" cx="${cx / W}" cy="0.48" r="0.42"><stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.28"/></filter>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.3"/></filter>
   </defs>
   <image href="${scene}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
-  <rect width="${W}" height="${H}" fill="url(#glow)"/>
   <g filter="url(#shadow)">
     <rect x="890" y="24" width="286" height="84" rx="16" fill="#ffffff"/>
     <image href="${SYU_ICON}" x="904" y="34" width="64" height="64"/>
     <text x="978" y="72" font-family="Poppins" font-weight="800" font-size="38" fill="${NAVY}">SELECT</text>
     <text x="980" y="96" font-family="Poppins" font-weight="700" font-size="16" fill="${PINK}">YOUR UNIVERSITY</text>
   </g>
-  ${logo ? `<g filter="url(#shadow)"><circle cx="1040" cy="300" r="118" fill="#ffffff"/></g>
-  <image href="${logo}" x="${1040 - logoBox / 2}" y="${300 - logoBox / 2}" width="${logoBox}" height="${logoBox}" preserveAspectRatio="xMidYMid meet" clip-path="url(#logoClip)"/>` : ''}
-  <g transform="rotate(-3 ${cx} 330)">${strokes}</g>
+  <g transform="rotate(-2 ${cx} 350)">
+    <g filter="url(#shadow)">${brush(cx, 350, blobW, total + 70, NAVY, 5)}</g>
+    ${rays(cx - blobW / 2 - 18, midY, -1)}${rays(cx + blobW / 2 + 18, midY, 1)}
+    ${text}
+  </g>
 </svg>`;
   return new Resvg(svg, { font: { fontFiles: FONTS, loadSystemFonts: false, defaultFontFamily: 'Poppins' }, fitTo: { mode: 'width', value: W } }).render().asPng();
 }
