@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { runAgent, checkSubTask, fixSubTask, submitSubTask, decide, aiStatus } from './agent.js';
 import { FIX_DIR } from './fixer.js';
-import { getSubTask, countSubTasks, countApprovedSince, findSubTasksByNumber, listSubTasks, STATUS, TYPES } from './cms.js';
+import { getSubTask, countSubTasks, countApprovedSince, findSubTasksByNumber, listSubTasks, cmsGet, qs, STATUS, TYPES } from './cms.js';
 import { notify, sendWhatsApp, showToast } from './notify.js';
 import { todayIST } from './checks.js';
 import { keyStatus, saveKey, testKey } from './keys.js';
@@ -233,19 +233,28 @@ let notified = null;
 try { notified = new Set(JSON.parse(readFileSync(NOTIFIED_FILE, 'utf8'))); } catch { /* first start */ }
 const TYPE_NAME = { blogs: 'Blog', colleges: 'College', exams: 'Exam', courses: 'Course' };
 const CMS_LIST = `${process.env.CMS_URL}/admin/collections/subTasks`;
+// "Task #48482 · Subtask #36325 — title" for each shown task (parent task numbers looked up in one request).
+async function withIds(list) {
+  const parents = [...new Set(list.map((t) => t.parentTaskId).filter((p) => typeof p === 'string'))];
+  let taskNo = {};
+  try {
+    if (parents.length) taskNo = Object.fromEntries((await cmsGet(`/tasks?${qs({ 'where[id][in]': parents.join(','), limit: parents.length, depth: 0 })}`)).docs.map((d) => [d.id, d.taskId]));
+  } catch (e) { console.log('SEO review watch: task IDs —', e.message); }
+  return list.map((t) => `${taskNo[t.parentTaskId] ? `Task #${taskNo[t.parentTaskId]} · ` : ''}Subtask #${t.subTaskId ?? ''} — ${t.title}`);
+}
 async function watchSeoReview() {
   try {
     const tasks = await listSubTasks(['readyForSEOReview']);
     const fresh = notified ? tasks.filter((t) => !notified.has(t.id)) : [];
     if (!notified) {
       // First start: one summary instead of a pop-up for every task already waiting.
-      if (tasks.length) notify(`${tasks.length} task${tasks.length > 1 ? 's' : ''} waiting for SEO review`, tasks.slice(0, 3).map((t) => t.title).join('\n'), `http://localhost:${PORT}`, CMS_LIST);
+      if (tasks.length) notify(`${tasks.length} task${tasks.length > 1 ? 's' : ''} waiting for SEO review`, (await withIds(tasks.slice(0, 3))).join('\n'), CMS_LIST);
       notified = new Set();
     } else if (fresh.length === 1) {
       const t = fresh[0];
-      notify(`New ${TYPE_NAME[t.contentCategory] || 'task'} ready for SEO review`, `#${t.subTaskId ?? ''} ${t.title}`, `${process.env.CMS_URL}/admin/collections/subTasks/${t.id}`);
+      notify(`New ${TYPE_NAME[t.contentCategory] || 'task'} ready for SEO review`, (await withIds([t]))[0], `${process.env.CMS_URL}/admin/collections/subTasks/${t.id}`);
     } else if (fresh.length > 1) {
-      notify(`${fresh.length} new tasks ready for SEO review`, fresh.slice(0, 4).map((t) => `${TYPE_NAME[t.contentCategory] || ''}: ${t.title}`).join('\n'), `http://localhost:${PORT}`, CMS_LIST);
+      notify(`${fresh.length} new tasks ready for SEO review`, (await withIds(fresh.slice(0, 4))).map((s, i) => `${TYPE_NAME[fresh[i].contentCategory] || ''}: ${s}`).join('\n'), CMS_LIST);
     }
     for (const t of tasks) notified.add(t.id);
     // Keep only tasks still waiting (plus a margin), so the file stays small.
@@ -255,7 +264,7 @@ async function watchSeoReview() {
   } catch (e) { console.log('SEO review watch:', e.message); }
 }
 app.post('/api/test-notification', async (_, res) => {
-  showToast('New Blog ready for SEO review', '#12345 Test task — notifications are working ✓', `http://localhost:${PORT}`);
+  showToast('New Blog ready for SEO review', 'Task #48482 · Subtask #12345 — Test task, notifications are working ✓', CMS_LIST);
   if (!process.env.WHATSAPP_RECIPIENTS) return res.json({ ok: true, whatsapp: 'not set up' });
   const wa = await sendWhatsApp('*Test from SEO agent*\nWhatsApp alerts for "Ready for SEO review" are working ✓');
   res.json({ ok: !wa.errors.length, whatsapp: wa });

@@ -1,9 +1,32 @@
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 
 // Windows toast notification (bottom-right corner), shown through PowerShell so no extra app is needed.
-// Clicking it opens the dashboard.
+// Clicking it opens the task in the CMS.
 const APP_ID = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe';
 const xmlEsc = (s) => String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+
+// Clicks open in Chrome, not the default browser: links get a "syu-chrome:" prefix, a link type registered
+// for this Windows user (no admin) that a small script hands to Chrome. Without Chrome the plain link is used.
+const CHROME = ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`].find((p) => existsSync(p));
+let chromeReady = false;
+function inChrome(url) {
+  if (!CHROME || !/^https?:/.test(url || '')) return url;
+  if (!chromeReady) {
+    try {
+      const dir = `${process.env.LOCALAPPDATA}\\SYU`, vbs = `${dir}\\open-in-chrome.vbs`, key = 'HKCU\\Software\\Classes\\syu-chrome';
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(vbs, `u = Mid(WScript.Arguments(0), 12)\r\nCreateObject("WScript.Shell").Run """${CHROME}"" """ & u & """", 1, False\r\n`);
+      const reg = (...a) => execFileSync('reg', ['add', ...a, '/f'], { windowsHide: true, stdio: 'ignore' });
+      reg(key, '/ve', '/d', 'URL:SYU open in Chrome');
+      reg(key, '/v', 'URL Protocol', '/d', '');
+      reg(`${key}\\shell\\open\\command`, '/ve', '/d', `"${process.env.SystemRoot}\\System32\\wscript.exe" "${vbs}" "%1"`);
+      chromeReady = true;
+    } catch (e) { console.log('notification: Chrome link not set up —', e.message); return url; }
+  }
+  return `syu-chrome:${url}`;
+}
 
 // WhatsApp message (phone + laptop) through CallMeBot, free for personal alerts.
 // WHATSAPP_RECIPIENTS = "919876543210:123456" (country code + number : CallMeBot apikey), comma-separated for more people.
@@ -37,9 +60,10 @@ export function notify(title, body, url, link = url) {
 
 export function showToast(title, body, url) {
   if (process.platform !== 'win32') return;
+  url = inChrome(url);
   const xml = `<toast activationType="protocol" launch="${xmlEsc(url)}"><visual><binding template="ToastGeneric">`
     + `<text>${xmlEsc(title)}</text><text>${xmlEsc(String(body).slice(0, 300))}</text></binding></visual>`
-    + `<actions><action content="Open dashboard" activationType="protocol" arguments="${xmlEsc(url)}"/></actions></toast>`;
+    + `<actions><action content="Open in CMS" activationType="protocol" arguments="${xmlEsc(url)}"/></actions></toast>`;
   const script = `
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
 [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null
