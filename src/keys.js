@@ -3,6 +3,7 @@
 // and its last 4 characters.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { sendWhatsApp } from './notify.js';
 
 const ENV_FILE = fileURLToPath(new URL('../.env', import.meta.url));
 
@@ -24,6 +25,12 @@ export const KEYS = [
     label: 'OpenAI (ChatGPT) API key',
     usedFor: 'SEO Approval Agent — AI photo backgrounds for feature images, when "ChatGPT" is chosen as the image AI. Needs credit on platform.openai.com.',
     help: 'platform.openai.com/api-keys',
+  },
+  {
+    name: 'WHATSAPP_RECIPIENTS',
+    label: 'WhatsApp alerts (CallMeBot)',
+    usedFor: 'SEO Approval Agent — WhatsApp message on phone and laptop when a task comes in Ready for SEO review. Format: number with country code:apikey, e.g. 919876543210:123456 (comma between people). Free.',
+    help: 'callmebot.com/blog/free-api-whatsapp-messages — save their number, send it "I allow callmebot to send me messages" on WhatsApp, it replies with your apikey',
   },
 ];
 
@@ -68,6 +75,11 @@ export async function testKey(name) {
       const r = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${v}` } });
       const j = await r.json().catch(() => ({}));
       return r.ok ? { ok: true, message: 'Key works (credit balance is not shown by this check)' } : { ok: false, message: j.error?.message || `HTTP ${r.status}` };
+    }
+    if (name === 'WHATSAPP_RECIPIENTS') {
+      if (!/^\+?\d{8,15}:[^,:]+(,\+?\d{8,15}:[^,:]+)*$/.test(v)) return { ok: false, message: 'Use number:apikey, e.g. 919876543210:123456' };
+      const wa = await sendWhatsApp('*Test from SEO agent*\nWhatsApp alerts for "Ready for SEO review" are working ✓');
+      return wa.errors.length ? { ok: false, message: wa.errors.join('; ') } : { ok: true, message: `Test message sent to ${wa.sent} number${wa.sent > 1 ? 's' : ''} — check WhatsApp` };
     }
     return { ok: false, message: 'Unknown key' };
   } catch (e) {

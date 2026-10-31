@@ -25,3 +25,5 @@ services:
         value: "false"
       - key: GEMINI_API_KEY
         sync: false
+      - key: WHATSAPP_RECIPIENTS
+        sync: false

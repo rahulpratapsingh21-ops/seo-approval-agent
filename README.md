@@ -36,6 +36,9 @@ Approval works like the CMS screen: upload image (media + mediaRef) → Start SE
 ## API keys & image AI
 The dashboard panel **API keys & image AI** holds `ANTHROPIC_API_KEY` (Claude writes H1, meta, slug, CTA text, link anchors, alt text and image text), `GEMINI_API_KEY` and `OPENAI_API_KEY` (ChatGPT) for AI photo backgrounds. A switch picks the image AI, one at a time: **Gemini**, **ChatGPT (OpenAI)** or **Off** (campus photo / drawn design, no AI cost); saved in the agent settings. Paste, Save (written to `.env`, used at once), Test (free check with the provider). Only this agent uses these keys; the task creation and writer agents use none. The browser only ever sees whether a key is set and its last 4 characters.
 
+## Notifications
+Every 2 minutes the agent looks for new tasks in **Ready for SEO review**. Each new one gives a Windows pop-up (when it runs on this PC) and a **WhatsApp message** on phone and laptop with the CMS link. WhatsApp goes through CallMeBot (free): save their number, send it "I allow callmebot to send me messages", and put `number:apikey` (e.g. `919876543210:123456`, comma between people) in **API keys → WhatsApp alerts**, or set `WHATSAPP_RECIPIENTS` on Render. Set it in one place only (PC or Render), or every message comes twice.
+
 ## Run locally
 ```
 npm install
