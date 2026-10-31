@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { runAgent, checkSubTask, fixSubTask, submitSubTask, decide, aiStatus } from './agent.js';
 import { FIX_DIR } from './fixer.js';
-import { getSubTask, countSubTasks, countApprovedSince, findSubTasksByNumber, STATUS, TYPES } from './cms.js';
+import { getSubTask, countSubTasks, countApprovedSince, findSubTasksByNumber, listSubTasks, STATUS, TYPES } from './cms.js';
+import { notify } from './notify.js';
 import { todayIST } from './checks.js';
 import { keyStatus, saveKey, testKey } from './keys.js';
 
@@ -225,8 +226,42 @@ app.use('/fixes', express.static(FIX_DIR));
 app.get('/logo.png', (_, res) => res.sendFile(fileURLToPath(new URL('../assets/syu-icon.png', import.meta.url))));
 app.use(express.static(fileURLToPath(new URL('../public', import.meta.url))));
 
+// Desktop notification when a task comes in "Ready for SEO review" (checked every 2 minutes, a small request).
+// Tasks already notified are remembered across restarts so each one pops up only once.
+const NOTIFIED_FILE = `${DATA_DIR}/notified.json`;
+let notified = null;
+try { notified = new Set(JSON.parse(readFileSync(NOTIFIED_FILE, 'utf8'))); } catch { /* first start */ }
+const TYPE_NAME = { blogs: 'Blog', colleges: 'College', exams: 'Exam', courses: 'Course' };
+async function watchSeoReview() {
+  try {
+    const tasks = await listSubTasks(['readyForSEOReview']);
+    const fresh = notified ? tasks.filter((t) => !notified.has(t.id)) : [];
+    if (!notified) {
+      // First start: one summary instead of a pop-up for every task already waiting.
+      if (tasks.length) notify(`${tasks.length} task${tasks.length > 1 ? 's' : ''} waiting for SEO review`, tasks.slice(0, 3).map((t) => t.title).join('\n'), `http://localhost:${PORT}`);
+      notified = new Set();
+    } else if (fresh.length === 1) {
+      const t = fresh[0];
+      notify(`New ${TYPE_NAME[t.contentCategory] || 'task'} ready for SEO review`, `#${t.subTaskId ?? ''} ${t.title}`, `${process.env.CMS_URL}/admin/collections/subTasks/${t.id}`);
+    } else if (fresh.length > 1) {
+      notify(`${fresh.length} new tasks ready for SEO review`, fresh.slice(0, 4).map((t) => `${TYPE_NAME[t.contentCategory] || ''}: ${t.title}`).join('\n'), `http://localhost:${PORT}`);
+    }
+    for (const t of tasks) notified.add(t.id);
+    // Keep only tasks still waiting (plus a margin), so the file stays small.
+    notified = new Set([...notified].slice(-1000));
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(NOTIFIED_FILE, JSON.stringify([...notified]));
+  } catch (e) { console.log('SEO review watch:', e.message); }
+}
+app.post('/api/test-notification', (_, res) => {
+  notify('New Blog ready for SEO review', '#12345 Test task — notifications are working ✓', `http://localhost:${PORT}`);
+  res.json({ ok: true });
+});
+
 app.listen(PORT, () => {
   console.log(`SEO agent dashboard on http://localhost:${PORT} (${settings.paused ? 'PAUSED' : `runs every ${settings.everyMinutes} min`}${DRY_RUN ? ', DRY RUN' : ''})`);
   if (!settings.paused) run('startup');
   schedule();
+  watchSeoReview();
+  setInterval(watchSeoReview, 2 * 60_000);
 });
